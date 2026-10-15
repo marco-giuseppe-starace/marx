@@ -585,10 +585,10 @@ def github(path):
 
 
 def changelog_for(tag, version):
-    import urllib.request
+    """Novità della versione, prese dal CHANGELOG.md di quella release (API di GitHub, sempre aggiornata)."""
+    import base64
     try:
-        with urllib.request.urlopen(urllib.request.Request(f'https://raw.githubusercontent.com/{REPO}/{tag}/CHANGELOG.md', headers={'User-Agent': 'MarX-updater'}), timeout=15) as r:
-            text = r.read().decode()
+        text = base64.b64decode(github(f'/contents/CHANGELOG.md?ref={tag}')['content']).decode()
         m = re.search(rf'^## {re.escape(version)}\b.*?(?=^## |\Z)', text, re.S | re.M)
         return m.group(0).strip() if m else ''
     except Exception:
@@ -711,7 +711,8 @@ def do_system_update(jid, _app, target):
 
             step(jid, 30, f'Download di MarX {target["version"]}…')
             tag = target['tag']
-            rc, out = as_owner('git', 'fetch', '--quiet', f'https://github.com/{REPO}.git', f'refs/tags/{tag}:refs/tags/{tag}', timeout=300)
+            # «+»: l'etichetta locale può essere rimasta da un tentativo precedente
+            rc, out = as_owner('git', 'fetch', '--quiet', f'https://github.com/{REPO}.git', f'+refs/tags/{tag}:refs/tags/{tag}', timeout=300)
             if rc != 0:
                 raise RuntimeError('Download non riuscito: ' + out[-300:])
             rc, out = as_owner('git', 'merge', '--ff-only', '--quiet', tag)
