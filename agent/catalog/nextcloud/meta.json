@@ -1,0 +1,26 @@
+{
+  "name": "Nextcloud",
+  "category": "File",
+  "icon": "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/nextcloud.png",
+  "mem": "1g",
+  "cpus": 2,
+  "start_timeout": 240,
+  "summary": "Cloud privato: file, calendario, contatti",
+  "description": "Alternativa privata a Google Drive e Dropbox: sincronizzazione file, calendario, contatti e app per telefono e computer.",
+  "first_run": "Accedi con l'utente e la password scelti qui sotto. Il primo avvio richiede 1–2 minuti.",
+  "params": [
+    {
+      "key": "NC_USER",
+      "label": "Utente amministratore",
+      "default": "admin",
+      "required": true
+    },
+    {
+      "key": "NC_PASS",
+      "label": "Password amministratore (min. 10 caratteri)",
+      "type": "password",
+      "required": true,
+      "min": 10
+    }
+  ]
+}

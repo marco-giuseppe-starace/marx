@@ -1,0 +1,23 @@
+{
+  "name": "WordPress",
+  "category": "Siti web",
+  "icon": "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/wordpress.png",
+  "mem": "512m",
+  "cpus": 1,
+  "start_timeout": 180,
+  "summary": "Sito web o blog",
+  "description": "Il sistema più usato al mondo per creare siti e blog, con il suo database dedicato già configurato.",
+  "first_run": "Apri l'app e completa l'installazione guidata (lingua, titolo del sito, utente amministratore).",
+  "params": [
+    {
+      "key": "DB_PASS",
+      "label": "Password database",
+      "generate": true
+    },
+    {
+      "key": "DB_ROOT",
+      "label": "Password root database",
+      "generate": true
+    }
+  ]
+}

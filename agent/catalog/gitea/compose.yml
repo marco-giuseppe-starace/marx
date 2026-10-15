@@ -1,0 +1,18 @@
+services:
+  app:
+    image: gitea/gitea:1
+    restart: unless-stopped
+    ports: ["127.0.0.1:${PORT}:3000"]
+    environment:
+      USER_UID: 1000
+      USER_GID: 1000
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__server__DOMAIN: ${DOMAIN}
+      GITEA__server__ROOT_URL: https://${DOMAIN}/
+      GITEA__server__DISABLE_SSH: "true"
+      TZ: ${TZ}
+    volumes: [data:/data]
+    mem_limit: ${MEM}
+    cpus: ${CPUS}
+volumes:
+  data:

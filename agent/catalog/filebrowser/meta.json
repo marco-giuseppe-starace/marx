@@ -1,0 +1,10 @@
+{
+  "name": "File Browser",
+  "category": "File",
+  "icon": "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/filebrowser.png",
+  "mem": "256m",
+  "cpus": 0.5,
+  "summary": "Gestione file via web con condivisione",
+  "description": "Carica, organizza e condividi file con link pubblici, anche con altre persone, ognuna con il suo account.",
+  "first_run": "Utente iniziale: admin. La password iniziale è generata a caso: la trovi in App Store › File Browser › Log (riga «randomly generated password»)."
+}

@@ -1,0 +1,10 @@
+{
+  "name": "n8n",
+  "category": "Automazione",
+  "icon": "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/n8n.png",
+  "mem": "1g",
+  "cpus": 2,
+  "summary": "Automazioni tra app e servizi",
+  "description": "Crea flussi automatici collegando email, fogli di calcolo, CRM, webhook e centinaia di servizi, con un editor visuale a blocchi.",
+  "first_run": "Apri l'app subito e crea l'account proprietario."
+}

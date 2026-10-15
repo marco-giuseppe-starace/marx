@@ -1,0 +1,17 @@
+{
+  "name": "Vaultwarden",
+  "category": "Sicurezza",
+  "icon": "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/vaultwarden.png",
+  "mem": "256m",
+  "cpus": 0.5,
+  "summary": "Gestore di password compatibile Bitwarden",
+  "description": "Cassaforte per password, carte e note sicure. Funziona con le app e le estensioni ufficiali di Bitwarden su telefono e computer.",
+  "first_run": "Apri l'app e crea il tuo account. Poi puoi disattivare le nuove registrazioni reinstallando con «Consenti registrazioni» su no.",
+  "params": [
+    {
+      "key": "SIGNUPS",
+      "label": "Consenti registrazioni (true/false)",
+      "default": "true"
+    }
+  ]
+}

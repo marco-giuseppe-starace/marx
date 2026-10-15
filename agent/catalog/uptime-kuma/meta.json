@@ -1,0 +1,10 @@
+{
+  "name": "Uptime Kuma",
+  "category": "Monitoraggio",
+  "icon": "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/uptime-kuma.png",
+  "mem": "256m",
+  "cpus": 0.5,
+  "summary": "Controlla che i tuoi siti siano online",
+  "description": "Controlla ogni minuto che siti, server e servizi rispondano, mostra i tempi di risposta e ti avvisa (email, Telegram e altri) quando qualcosa cade.",
+  "first_run": "Apri l'app subito dopo l'installazione e crea l'account amministratore: il primo che lo fa diventa il proprietario."
+}

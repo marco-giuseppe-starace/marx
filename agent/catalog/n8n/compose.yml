@@ -1,0 +1,17 @@
+services:
+  app:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports: ["127.0.0.1:${PORT}:5678"]
+    environment:
+      N8N_HOST: ${DOMAIN}
+      N8N_PROTOCOL: https
+      N8N_PROXY_HOPS: 1
+      WEBHOOK_URL: https://${DOMAIN}/
+      GENERIC_TIMEZONE: ${TZ}
+      TZ: ${TZ}
+    volumes: [data:/home/node/.n8n]
+    mem_limit: ${MEM}
+    cpus: ${CPUS}
+volumes:
+  data:

@@ -1,0 +1,13 @@
+[Unit]
+Description=MarX Soft Store agent (Docker, Apache, certificati)
+After=network.target docker.service apache2.service
+Requires=docker.service
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/marx-agent/agent.py
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

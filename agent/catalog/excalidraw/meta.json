@@ -1,0 +1,10 @@
+{
+  "name": "Excalidraw",
+  "category": "Produttività",
+  "icon": "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/excalidraw.png",
+  "mem": "128m",
+  "cpus": 0.5,
+  "summary": "Lavagna per schemi e disegni",
+  "description": "Lavagna virtuale per schemi, diagrammi e bozze a mano libera. I disegni restano nel browser e si esportano in PNG o SVG.",
+  "first_run": "Non ha account: chiunque conosca l'indirizzo può usarla (i disegni restano nel suo browser)."
+}

@@ -1,0 +1,10 @@
+{
+  "name": "IT Tools",
+  "category": "Sviluppo",
+  "icon": "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/it-tools.png",
+  "mem": "128m",
+  "cpus": 0.5,
+  "summary": "Raccolta di strumenti per sviluppatori",
+  "description": "Oltre 80 strumenti: generatori di password e UUID, conversioni JSON/YAML, hash, codifiche, QR code, calcolatrici di rete e altro.",
+  "first_run": "Non ha account: chiunque conosca l'indirizzo può usarla (tutto gira nel browser)."
+}

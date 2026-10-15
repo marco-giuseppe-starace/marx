@@ -1,0 +1,10 @@
+{
+  "name": "Gitea",
+  "category": "Sviluppo",
+  "icon": "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/gitea.png",
+  "mem": "512m",
+  "cpus": 1,
+  "summary": "Repository Git privati",
+  "description": "Il tuo GitHub privato: repository Git, issue, pull request e wiki, leggero e veloce.",
+  "first_run": "Apri l'app e completa la pagina di installazione: lascia SQLite come database e crea l'utente amministratore in fondo alla pagina."
+}

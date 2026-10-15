@@ -1,0 +1,7 @@
+services:
+  app:
+    image: corentinth/it-tools:latest
+    restart: unless-stopped
+    ports: ["127.0.0.1:${PORT}:80"]
+    mem_limit: ${MEM}
+    cpus: ${CPUS}

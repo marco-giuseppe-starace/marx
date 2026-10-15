@@ -1,0 +1,30 @@
+services:
+  app:
+    image: wordpress:latest
+    restart: unless-stopped
+    ports: ["127.0.0.1:${PORT}:80"]
+    depends_on: [db]
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: ${DB_PASS}
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_CONFIG_EXTRA: |
+        if (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { $$_SERVER['HTTPS'] = 'on'; }
+    volumes: [site:/var/www/html]
+    mem_limit: ${MEM}
+    cpus: ${CPUS}
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: ${DB_PASS}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT}
+    volumes: [db:/var/lib/mysql]
+    mem_limit: 512m
+    cpus: 1
+volumes:
+  site:
+  db:
