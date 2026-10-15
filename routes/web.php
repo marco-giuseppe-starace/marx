@@ -12,6 +12,7 @@ use App\Http\Controllers\NoteController;
 use App\Http\Controllers\ReminderController;
 use App\Http\Controllers\SearchController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\TerminalController;
 use App\Http\Controllers\ShareController;
 use App\Http\Controllers\UpdateController;
 use App\Http\Controllers\UserAdminController;
@@ -138,6 +139,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/system/update', [UpdateController::class, 'check']);
         Route::post('/system/update', [UpdateController::class, 'apply']);
 
+        Route::post('/terminal/session', [TerminalController::class, 'session'])->middleware('throttle:terminal');
         Route::get('/admin/users', [UserAdminController::class, 'index']);
         Route::post('/admin/users', [UserAdminController::class, 'store']);
         Route::put('/admin/users/{user}', [UserAdminController::class, 'update']);

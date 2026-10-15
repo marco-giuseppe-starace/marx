@@ -191,6 +191,7 @@
         launchpad:  { name: 'Launchpad',    icon: 'launchpad', special: true },
         appstore:   { name: 'Soft Store',    icon: 'appstore', w: 980, h: 620, render: appstore, admin: true },
         activity:   { name: 'Monitoraggio Attività', icon: 'activity', w: 760, h: 560, render: activity, admin: true },
+        terminal:   { name: 'Terminale',    icon: 'terminal', w: 760, h: 480, render: terminal, admin: true },
     };
     if (!MARX.user.is_admin) Object.keys(APPS).forEach(k => APPS[k].admin && delete APPS[k]);
     // Icona di un'app: disegnata in CSS, oppure immagine per le app installate dal Soft Store
@@ -3629,6 +3630,89 @@
         };
     }
 
+    /* ---------- Terminale (solo amministratori, password a ogni apertura) ---------- */
+    let xtermReady = null;
+    function loadXterm() {
+        if (window.Terminal && window.FitAddon) return Promise.resolve();
+        return xtermReady ||= (async () => {
+            const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/vendor/xterm/xterm.css'; document.head.append(css);
+            for (const f of ['xterm.js', 'xterm-addon-fit.js', 'xterm-addon-web-links.js']) await loadScript('/vendor/xterm/' + f);
+        })().catch(e => { xtermReady = null; throw e; });
+    }
+    const TERM_THEMES = {
+        base: { name: 'Base', background: '#ffffff', foreground: '#1d1d1f', cursor: '#1d1d1f', selectionBackground: '#b4d5fe' },
+        pro: { name: 'Pro', background: '#1e1e1e', foreground: '#f2f2f2', cursor: '#9b9b9b', selectionBackground: '#4a5a7a' },
+        homebrew: { name: 'Homebrew', background: '#000000', foreground: '#28fe14', cursor: '#38fe27', selectionBackground: '#0b5c0b' },
+        ocean: { name: 'Oceano', background: '#224fbc', foreground: '#ffffff', cursor: '#ffffff', selectionBackground: '#4c74d6' },
+    };
+    function terminal(body, win) {
+        const P = () => prefs('terminal', { theme: matchMedia('(prefers-color-scheme: dark)').matches || S.theme === 'dark' ? 'pro' : 'base', size: 13 });
+        let term = null, fit = null, ws = null, ro = null;
+        const title = t => { const el = $('.titlebar .title', win); if (el) el.textContent = t; };
+        function askPassword(msg) {
+            body.innerHTML = `<form class="tm-auth"><div class="tm-lock">🔒</div><h3>Terminale vuole aprire una shell sul server</h3>
+                <p>La shell gira come utente <b>marco</b> e può amministrare il server.<br>Inserisci la password di <b>${esc(MARX.user.name)}</b> per continuare.</p>
+                <input type="password" name="password" placeholder="Password" autocomplete="current-password" required><p class="tm-err">${esc(msg || '')}</p>
+                <div class="acts"><button type="button" class="btn" data-x>Annulla</button><button class="btn primary">Apri</button></div></form>`;
+            const f = $('form', body), inp = $('input', f);
+            setTimeout(() => inp.focus(), 50);
+            $('[data-x]', f).onclick = () => close('terminal');
+            f.onsubmit = async e => {
+                e.preventDefault(); $('.btn.primary', f).disabled = true;
+                try { const r = await api('POST', '/terminal/session', { password: inp.value }); start(r.token); }
+                catch (err) { if (!body.isConnected) return; f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); $('.tm-err', f).textContent = /429|Too Many/i.test(err.message) ? 'Troppi tentativi: riprova tra un minuto.' : err.message; $('.btn.primary', f).disabled = false; inp.select(); }
+            };
+        }
+        async function start(token) {
+            body.innerHTML = '<div class="tm"><div class="tm-screen"></div></div>';
+            try { await loadXterm(); } catch { body.innerHTML = '<p class="rm-empty">Impossibile caricare il terminale.</p>'; return; }
+            if (!body.isConnected) return;
+            const p = P(), th = TERM_THEMES[p.theme] || TERM_THEMES.pro;
+            $('.tm', body).style.background = th.background;
+            term = new Terminal({ fontFamily: '"SF Mono", Menlo, Monaco, "DejaVu Sans Mono", Consolas, monospace', fontSize: p.size, cursorBlink: true, allowProposedApi: true, scrollback: 5000, theme: th, macOptionIsMeta: true });
+            fit = new FitAddon.FitAddon(); term.loadAddon(fit);
+            try { term.loadAddon(new WebLinksAddon.WebLinksAddon((e, url) => { open('webx'); ctlOf('webx').go?.(url); })); } catch {}
+            term.open($('.tm-screen', body)); fit.fit();
+            // Copia e incolla: Ctrl+Maiusc+C / Ctrl+Maiusc+V (Ctrl+C resta l'interruzione della shell)
+            term.attachCustomKeyEventHandler(e => {
+                if (e.type !== 'keydown') return true;
+                const k = e.key.toLowerCase();
+                if ((e.ctrlKey && e.shiftKey || e.metaKey) && k === 'c' && term.hasSelection()) { navigator.clipboard?.writeText(term.getSelection()); return false; }
+                if ((e.ctrlKey && e.shiftKey || e.metaKey) && k === 'v') { paste(); e.preventDefault(); return false; }
+                if (e.metaKey && k === 'k') { term.clear(); return false; }
+                return true;
+            });
+            ws = new WebSocket(`wss://${location.host}/term/ws?t=${encodeURIComponent(token)}&cols=${term.cols}&rows=${term.rows}`);
+            ws.binaryType = 'arraybuffer';
+            ws.onopen = () => { title(`marco — bash — ${term.cols}×${term.rows}`); term.focus(); };
+            ws.onmessage = ev => term.write(new Uint8Array(ev.data));
+            ws.onclose = () => { if (!body.isConnected) return; term.write('\r\n\x1b[2m[Processo completato]\x1b[0m\r\n'); title('Terminale'); ws = null;
+                const bar = document.createElement('div'); bar.className = 'tm-ended'; bar.innerHTML = '<span>Sessione terminata</span><button class="btn primary" data-tm="again">Nuova sessione…</button>'; $('.tm', body).append(bar); };
+            term.onData(d => ws?.readyState === 1 && ws.send('0' + d));
+            term.onResize(({ cols, rows }) => { if (ws?.readyState === 1) ws.send('1' + JSON.stringify({ cols, rows })); title(`marco — bash — ${cols}×${rows}`); });
+            ro = new ResizeObserver(() => { try { fit.fit(); } catch {} }); ro.observe($('.tm-screen', body));
+        }
+        async function paste() { try { const t = await navigator.clipboard.readText(); if (t && ws?.readyState === 1) ws.send('0' + t); } catch { toast('Il browser non consente di leggere gli appunti: usa il tasto destro › Incolla del browser.', { app: 'Terminale' }); } }
+        function applyPrefs() { if (!term) return; const p = P(), th = TERM_THEMES[p.theme]; term.options.theme = th; term.options.fontSize = p.size; $('.tm', body).style.background = th.background; try { fit.fit(); } catch {} }
+        function setPref(k, v) { savePrefs('terminal', { ...P(), [k]: v }); applyPrefs(); }
+        function end() { ro?.disconnect(); if (ws) { ws.onclose = null; ws.close(); ws = null; } term?.dispose(); term = null; }
+        body.addEventListener('click', e => { if (e.target.closest('[data-tm="again"]')) { end(); askPassword(); } });
+        const watch = new MutationObserver(() => { if (!body.isConnected) { end(); watch.disconnect(); } }); watch.observe(document.body, { childList: true, subtree: true });
+        askPassword();
+        return {
+            confirmClose: async () => { if (ws?.readyState !== 1) return true; const ok = await sheet(win, { title: 'Vuoi chiudere questa finestra?', text: 'La shell e i processi avviati in questa sessione verranno terminati.', ok: 'Termina', danger: true }); if (ok) end(); return !!ok; },
+            context: () => term ? [['Copia', term.hasSelection() && (() => navigator.clipboard?.writeText(term.getSelection()))], ['Incolla', paste], ['Seleziona tutto', () => term.selectAll()], '-', ['Pulisci', () => term.clear()]] : null,
+            menus: () => ({
+                Shell: [['Nuova sessione…', () => { end(); askPassword(); }], ['Pulisci schermo', term && (() => term.clear()), '⌘K'], ['Interrompi (Ctrl+C)', ws && (() => ws.send('0\x03'))], '-', ['Chiudi sessione', ws && (() => { end(); askPassword(); })]],
+                Vista: [...Object.entries(TERM_THEMES).map(([k, t]) => [check(P().theme === k, 'Tema ' + t.name), () => setPref('theme', k)]), '-',
+                    ['Ingrandisci il testo', () => setPref('size', Math.min(28, P().size + 1)), '⌘+'], ['Riduci il testo', () => setPref('size', Math.max(9, P().size - 1)), '⌘−'], ['Dimensioni reali', () => setPref('size', 13)]],
+            }),
+            prefs: () => sheet(win, { title: 'Impostazioni Terminale', ok: 'Salva', fields: [{ name: 'theme', type: 'select', label: 'Tema', value: P().theme, options: Object.entries(TERM_THEMES).map(([k, t]) => [k, t.name]) },
+                { name: 'size', type: 'select', label: 'Dimensione testo', value: P().size, options: [10, 11, 12, 13, 14, 15, 16, 18, 20, 24].map(n => [n, n + ' pt']) }] })
+                .then(r => { if (r) { savePrefs('terminal', { theme: r.theme, size: +r.size }); applyPrefs(); } }),
+        };
+    }
+
     /* ---------- Menu ---------- */
     const ctlOf = id => wins.get(id)?.ctl || {};
     function appInfo(id) {
@@ -4288,6 +4372,8 @@
     let recordingShortcut = null;  // impostato da Impostazioni › Tastiera mentre si registra una nuova combinazione
     addEventListener('keydown', e => {
         if (recordingShortcut) return recordingShortcut(e);
+        // Nel Terminale tutti i tasti vanno alla shell (tranne il passaggio tra le app)
+        if (e.target.closest?.('.xterm') && !(e.altKey && (e.code === 'KeyQ' || e.key === 'Tab'))) return;
         if (e.key === 'Escape') { sp.hidden = true; closePanels(); nc.hidden = true; $('.launchpad')?.remove(); if (document.body.classList.contains('mc')) exitMC(); if (switcher) switcherEnd(false); return; }
         if (e.altKey && (e.code === 'KeyQ' || e.key === 'Tab')) { e.preventDefault(); return switcherStep(e.shiftKey ? -1 : 1); }
         const combo = comboOf(e); if (!combo) return;

@@ -3,7 +3,12 @@
 La versione corrente è in `config/marx.php`.
 Formato: MAGGIORE.MINORE.CORREZIONE. Ogni gruppo di funzioni nuove aumenta il numero MINORE; le sole correzioni aumentano CORREZIONE.
 
-## 0.12.0 «Mondo» — 2026-10-15
+## 0.13.0 «Terminale» — 2026-10-15
+- Terminale: shell vera sul server (utente marco), solo per gli amministratori; a ogni apertura chiede la password, con al massimo 5 tentativi al minuto e un accesso valido una sola volta.
+- Temi Base, Pro, Homebrew e Oceano, dimensione del testo, copia e incolla (Ctrl+Maiusc+C / V), link cliccabili che si aprono in webX, conferma prima di chiudere una sessione attiva.
+- Il servizio del Terminale (marx-term) si installa da solo con l'aggiornamento, insieme all'inoltro in Apache.
+
+ «Mondo» — 2026-10-15
 - Meteo: tempo attuale, previsioni ora per ora (con alba e tramonto) e a 10 giorni, percepita, UV, vento, umidità, pressione; più città salvate nell'account e la tua posizione; sfondo animato in base al tempo; avviso nel Centro notifiche se arrivano pioggia o temporali; widget nel Centro notifiche.
 - Mappe: mappa stradale e satellite, ricerca di indirizzi e luoghi, Casa, Lavoro e luoghi salvati, percorsi in auto, a piedi e in bici con indicazioni passo passo (senza traffico in tempo reale); tasto destro sulla mappa per le indicazioni o per salvare un punto. Gli indirizzi dei Contatti si aprono in Mappe.
 - Orologio: ora del mondo con quadranti, sveglie ripetibili con suono e posticipa (suonano con MarX aperto nel browser), cronometro con giri, più timer insieme visibili nella barra dei menu.

@@ -24,6 +24,8 @@ class AppServiceProvider extends ServiceProvider
     {
         // Meteo e Mappe: limiti separati, così i tasselli della mappa non consumano quelli delle altre richieste
         RateLimiter::for('geo', fn (Request $r) => Limit::perMinute(120)->by('geo:'.$r->user()?->id));
+        // Terminale: al massimo 5 tentativi di password al minuto
+        RateLimiter::for('terminal', fn (Request $r) => Limit::perMinute(5)->by('term:'.$r->user()?->id));
         RateLimiter::for('tiles', fn (Request $r) => Limit::perMinute(3000)->by('tiles:'.$r->user()?->id));
     }
 }

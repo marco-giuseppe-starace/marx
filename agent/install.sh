@@ -12,4 +12,6 @@ install -m 644 -o root -g root marx-agent.service /etc/systemd/system/marx-agent
 systemctl daemon-reload
 systemctl enable --now marx-agent
 systemctl restart marx-agent
+# Terminale (servizio separato)
+sh ./term-install.sh
 echo "Agente MarX attivo"

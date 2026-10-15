@@ -1,0 +1,17 @@
+[Unit]
+Description=MarX Terminale (shell dell'utente marco via WebSocket)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/marx-agent/term.py
+Restart=always
+RestartSec=3
+User=marco
+SupplementaryGroups=www-data
+RuntimeDirectory=marx-term
+RuntimeDirectoryMode=0755
+Environment=USER=marco
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

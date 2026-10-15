@@ -1239,3 +1239,22 @@ html.cur-mac .mp-canvas.leaflet-grab, html.cur-mac .mp-canvas .leaflet-interacti
 @keyframes clkBlink { 50% { opacity: .3; } }
 .timer-mini { font-variant-numeric: tabular-nums; font-size: 12px; color: #ff9500; }
 html.cur-mac .clk-al, html.cur-mac .clk-round, html.cur-mac .clk-presets button, html.cur-mac .wx-card, html.cur-mac .mp-item, html.cur-mac .mp-btn, html.cur-mac .mp-zoom button { cursor: var(--cur-pointer) !important; }
+
+/* ---------- Terminale ---------- */
+.ico-terminal { background: linear-gradient(180deg, #4a4a4f, #1c1c1e); }
+.ico-terminal::before { content: ""; position: absolute; inset: 14% 12% 18%; border-radius: 8%; background: #0d0d0f; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+.ico-terminal::after { content: ">_"; position: absolute; left: 22%; top: 24%; color: #f2f2f2; font: 600 1.4em/1 Menlo, Monaco, monospace; }
+.dock-item .ico-terminal::after, .lp-grid .ico-terminal::after, .app-switcher .ico-terminal::after { font-size: 17px; }
+.tm { position: relative; height: 100%; padding: 6px 4px 4px 10px; border-radius: 0 0 var(--r-window) var(--r-window); overflow: hidden; }
+.tm-screen { height: 100%; }
+.tm .xterm-viewport { background: transparent !important; }
+.tm-ended { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 8px 10px 8px 16px; border-radius: 14px;
+    background: var(--lg-tint-strong); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: var(--lg-shadow); color: var(--text); }
+.tm-auth { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 20px; text-align: center; }
+.tm-lock { font-size: 46px; } .tm-auth h3 { margin: 0; } .tm-auth p { margin: 0; color: var(--muted); font-size: 13px; }
+.tm-auth input { width: 240px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--win-bg); color: var(--text); margin-top: 6px; }
+.tm-auth .tm-err { color: #ff3b30; min-height: 18px; }
+.tm-auth .acts { display: flex; gap: 8px; }
+.tm-auth.shake { animation: tmShake .4s; }
+@keyframes tmShake { 20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); } }
+html.cur-mac .tm .xterm, html.cur-mac .tm .xterm-screen { cursor: var(--cur-text) !important; }
