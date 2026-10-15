@@ -3,6 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\FileTag;
+use App\Models\MediaMeta;
+use App\Models\PhotoAlbum;
+use App\Models\PhotoFavorite;
+use App\Models\Playlist;
 use App\Models\Share;
 use App\Models\TrashItem;
 use Illuminate\Http\Request;
@@ -87,16 +91,38 @@ class FileController extends Controller
     private function repath(Request $request, string $from, ?string $to): void
     {
         $uid = $request->user()->id;
-        foreach ([FileTag::class, Share::class] as $model) {
+        foreach ([FileTag::class, Share::class, MediaMeta::class, PhotoFavorite::class] as $model) {
             $model::where('user_id', $uid)->where(fn ($q) => $q->where('path', $from)->orWhere('path', 'like', addcslashes($from, '%_\\').'/%'))
                 ->get()->each(function ($row) use ($from, $to) {
                     if ($to === null) {
                         $row->delete();
                     } else {
                         $row->path = $to.substr($row->path, strlen($from));
+                        if (array_key_exists('path_hash', $row->getAttributes())) {
+                            $row->path_hash = sha1($row->path);
+                        }
                         $row->save();
                     }
                 });
+        }
+        // Album e playlist contengono elenchi di percorsi
+        foreach ([PhotoAlbum::class, Playlist::class] as $model) {
+            foreach ($model::where('user_id', $uid)->get() as $row) {
+                $items = $row->items ?? [];
+                $new = [];
+                foreach ($items as $p) {
+                    if ($p === $from || str_starts_with($p, $from.'/')) {
+                        if ($to !== null) {
+                            $new[] = $to.substr($p, strlen($from));
+                        }
+                    } else {
+                        $new[] = $p;
+                    }
+                }
+                if ($new !== $items) {
+                    $row->update(['items' => $new]);
+                }
+            }
         }
     }
 
@@ -281,6 +307,20 @@ class FileController extends Controller
         }
 
         return response($data, 200, ['Content-Type' => 'text/plain; charset=UTF-8', 'X-Truncated' => $this->disk()->size($file) > $limit ? '1' : '0']);
+    }
+
+    /** Salva un file binario (es. immagine annotata in Anteprima): lo crea oppure lo sovrascrive. */
+    public function saveBinary(Request $request)
+    {
+        $request->validate(['path' => ['required', 'string'], 'file' => ['required', 'file', 'max:51200']]);
+        $rel = $this->rel($request->path);
+        abort_if($rel === '', 422);
+        $this->name(basename($rel));
+        $dir = $this->path($request, ltrim(dirname('/'.$rel), '/'));
+        abort_unless($this->disk()->directoryExists($dir), 404, 'La cartella non esiste più.');
+        $this->disk()->putFileAs($dir, $request->file('file'), basename($rel));
+
+        return ['path' => $rel];
     }
 
     /** Salva un file di testo (TextEdit): lo crea oppure lo sovrascrive. */

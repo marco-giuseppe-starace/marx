@@ -41,6 +41,8 @@ class SettingsController extends Controller
         'deskAlign' => ['boolean'],
         'dockApps' => ['nullable', 'array', 'max:40'],
         'dockApps.*' => ['string', 'regex:/^[a-z0-9-]{1,40}$/'],
+        'dockKnown' => ['array', 'max:60'],
+        'dockKnown.*' => ['string', 'regex:/^[a-z0-9-]{1,40}$/'],
         'dockStack' => ['array', 'max:20'],
         'dockStack.*.path' => ['required', 'string', 'max:1000'],
         'dockStack.*.type' => ['required', 'in:file,folder'],
@@ -103,6 +105,38 @@ class SettingsController extends Controller
         }
         $file = $request->file('image');
         $file->storeAs('wallpapers', $request->user()->id.'.'.$file->extension(), 'local');
+
+        $user = $request->user();
+        $user->settings = array_merge($user->settings ?? [], ['wallpaper' => 'custom', 'wallpaperVersion' => time()]);
+        $user->save();
+
+        return $user->settings;
+    }
+
+    /** «Imposta come sfondo» da un'immagine dei file dell'utente (HEIC convertito in JPEG). */
+    public function wallpaperFromFile(Request $request)
+    {
+        $rel = trim(str_replace('\\', '/', (string) $request->validate(['path' => ['required', 'string']])['path']), '/');
+        abort_if($rel === '' || str_contains('/'.$rel.'/', '/../') || str_starts_with($rel, '.trash'), 422);
+        $src = $request->user()->filesRoot().'/'.$rel;
+        abort_unless(Storage::disk('local')->fileExists($src), 404);
+        try {
+            $im = new \Imagick(Storage::disk('local')->path($src).'[0]');
+            if (method_exists($im, 'autoOrientImage')) {
+                $im->autoOrientImage();
+            }
+            if ($im->getImageWidth() > 3840) {
+                $im->thumbnailImage(3840, 0);
+            }
+            $im->setImageFormat('jpeg');
+            $im->setImageCompressionQuality(88);
+        } catch (\Throwable) {
+            abort(422, 'Questa immagine non si può usare come sfondo: il file è danneggiato o in un formato non supportato.');
+        }
+        if ($old = $this->wallpaperPath($request)) {
+            Storage::disk('local')->delete($old);
+        }
+        Storage::disk('local')->put('wallpapers/'.$request->user()->id.'.jpg', $im->getImageBlob());
 
         $user = $request->user();
         $user->settings = array_merge($user->settings ?? [], ['wallpaper' => 'custom', 'wallpaperVersion' => time()]);

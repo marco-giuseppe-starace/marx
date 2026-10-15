@@ -177,6 +177,9 @@
         webx:       { name: 'webX',         icon: 'webx',     w: 1120, h: 720, render: webx },
         reminders:  { name: 'Promemoria',   icon: 'reminders', w: 860, h: 580, render: reminders },
         contacts:   { name: 'Contatti',     icon: 'contacts', w: 900, h: 600, render: contacts },
+        photos:     { name: 'Foto',         icon: 'photos',   w: 1060, h: 700, render: photos },
+        music:      { name: 'Musica',       icon: 'music',    w: 1000, h: 660, render: music },
+        'preview-app': { name: 'Anteprima', icon: 'preview', hidden: true, render: b => { b.innerHTML = '<p class="rm-empty">Apri un\'immagine o un PDF dal Finder o da Foto per modificarlo in Anteprima.</p>'; } },
         textedit:   { name: 'TextEdit',     icon: 'textedit', w: 760, h: 560, render: (b, w) => textEditor(b, w, null) },
         calendar:   { name: 'Calendario',   icon: 'calendar', w: 1000, h: 660, render: calendar },
         settings:   { name: 'Impostazioni', icon: 'settings', w: 820, h: 600, render: settings },
@@ -238,6 +241,12 @@
     function open(id) {
         if (id === 'launchpad') return launchpad();
         if (id === 'trash') { open('finder'); return ctlOf('finder').go?.('trash'); }
+        // TextEdit e Anteprima hanno una finestra per documento: l'icona porta in primo piano l'ultimo aperto
+        if ((id === 'textedit' || id === 'preview-app') && !wins.has(id)) {
+            const pre = id === 'textedit' ? 'te-' : 'pv-';
+            const doc = mru.find(k => k.startsWith(pre) && wins.has(k)) || [...wins.keys()].find(k => k.startsWith(pre));
+            if (doc) return open(doc);
+        }
         const app = APPS[id]; if (!app) return;
         let w = wins.get(id);
         if (w) {
@@ -715,7 +724,8 @@
             if (it.type === 'folder') return load('files', full(it));
             const k = kindOf(it.name, it.type);
             if (k === 'zip') return unzip(it);
-            if (k === 'img' || k === 'pdf') return openPreview(it.name, fileUrl(full(it), true), k);
+            if (k === 'img' || k === 'pdf') return openPreview(it.name, fileUrl(full(it), true), k, full(it));
+            if (k === 'audio') return playFile(full(it));
             if (k === 'text') return openTextEdit(full(it));
             if (['video', 'audio'].includes(k)) return quickLook([qlItem(it, full(it))]);
             location.href = fileUrl(full(it));
@@ -998,7 +1008,8 @@
         const openFile = f => {
             if (f.type === 'folder') { open('finder'); return ctlOf('finder').go?.('files', 'Scrivania/' + f.name); }
             const k = kindOf(f.name, f.type);
-            if (k === 'img' || k === 'pdf') return openPreview(f.name, fileUrl('Scrivania/' + f.name, true), k);
+            if (k === 'img' || k === 'pdf') return openPreview(f.name, fileUrl('Scrivania/' + f.name, true), k, 'Scrivania/' + f.name);
+            if (k === 'audio') return playFile('Scrivania/' + f.name);
             if (k === 'text') return openTextEdit('Scrivania/' + f.name);
             quickLook([qlItem(f, 'Scrivania/' + f.name)]);
         };
@@ -1110,15 +1121,6 @@
     }
 
 
-    function openPreview(name, url, kind) {
-        const id = 'preview';
-        if (wins.has(id)) { wins.get(id).remove(); wins.delete(id); }
-        APPS[id] = { name, icon: kind, w: 720, h: 520, hidden: true, render: body => {
-            body.innerHTML = `<div class="preview">${kind === 'img' ? `<img src="${esc(url)}" alt="${esc(name)}">` : `<iframe src="${esc(url)}" title="${esc(name)}"></iframe>`}</div>`;
-            return { menus: () => ({ File: [['Scarica', () => location.href = url.replace('&inline=1', '')], ['Apri in una nuova scheda', () => window.open(url)], '-', ['Chiudi finestra', () => close('preview'), '⌘W']] }) };
-        } };
-        open(id);
-    }
 
     // Voci di menu: '-' separatore, oppure [etichetta, azione, scorciatoia, disattivata]
     const menuHTML = items => items.map((it, i) => {
@@ -2125,6 +2127,491 @@
                 const c = list.find(x => x.id === +it.dataset.cid); return [['Modifica', () => { sel = c.id; editing = true; draw(); }], [c.favorite ? 'Togli dai preferiti' : 'Aggiungi ai preferiti', async () => { Object.assign(c, await api('PUT', `/contacts/${c.id}`, { favorite: !c.favorite })); draw(); }],
                     ['Esporta vCard', () => { location.href = '/contacts/export?ids=' + c.id; }], '-', ['Elimina…', async () => { const ok = await sheet(win, { title: `Eliminare ${nameOf(c)}?`, ok: 'Elimina', danger: true }); if (ok) { await api('DELETE', `/contacts/${c.id}`); playSound('trash'); load(false); } }]]; },
             menus: () => ({ File: [['Nuovo contatto', () => body.querySelector('[data-cact=new]').click(), '⌘N'], ['Importa vCard…', () => body.querySelector('[data-import]').click()], ['Esporta tutti', () => { location.href = '/contacts/export'; }], '-', ['Chiudi finestra', () => close('contacts'), '⌘W']] }),
+        };
+    }
+
+    /* ---------- Librerie caricate solo quando servono (PDF) ---------- */
+    const libs = {};
+    function loadScript(url) {
+        return libs[url] ||= new Promise((res, rej) => { const s = document.createElement('script'); s.src = url; s.onload = res; s.onerror = () => rej(new Error('Impossibile caricare ' + url)); document.head.append(s); });
+    }
+    async function pdfjs() {
+        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        return window.pdfjsLib;
+    }
+    const thumbUrl = (p, size = 's') => '/media/thumb?size=' + size + '&path=' + encodeURIComponent(p);
+
+    /* ---------- Foto ---------- */
+    function photos(body, win) {
+        let all = [], albums = [], view = 'library', sel = new Set(), anchor = null, zoom = store.get('photos.zoom', 150);
+        const list = () => view === 'library' ? all : view === 'fav' ? all.filter(p => p.fav) : (() => { const a = albums.find(x => 'a' + x.id === view); return a ? (a.items || []).map(p => all.find(x => x.path === p)).filter(Boolean) : []; })();
+        async function load() {
+            try { const d = await api('GET', '/media/photos'); all = d.photos; albums = d.albums; } catch (e) { return toast(e.message, { app: 'Foto' }); }
+            draw();
+        }
+        const when = p => new Date((p.taken || p.modified) * 1000);
+        function draw() {
+            const items = list(); let month = '';
+            const title = view === 'library' ? 'Libreria' : view === 'fav' ? 'Preferiti' : albums.find(x => 'a' + x.id === view)?.name || '';
+            body.innerHTML = `<div class="ph">
+                <aside class="sidebar ph-side"><h4>Foto</h4>
+                    <button class="${view === 'library' ? 'active' : ''}" data-pv="library"><span class="fx-si">🖼</span>Libreria <small>${all.length}</small></button>
+                    <button class="${view === 'fav' ? 'active' : ''}" data-pv="fav"><span class="fx-si">♥</span>Preferiti <small>${all.filter(p => p.fav).length}</small></button>
+                    <h4>Album</h4>${albums.map(a => `<button class="${view === 'a' + a.id ? 'active' : ''}" data-pv="a${a.id}" data-album="${a.id}"><span class="fx-si">▢</span>${esc(a.name)} <small>${(a.items || []).length}</small></button>`).join('')}
+                    <button class="rm-add-list" data-pact="new-album">＋ Nuovo album</button>
+                    <label class="ct-side-btn" style="margin-top:12px">Importa foto…<input type="file" accept="image/*,.heic,.heif" multiple hidden data-import></label></aside>
+                <div class="ph-main"><div class="ph-bar"><h2>${esc(title)}</h2><span class="sub">${items.length} foto</span>
+                    <button class="btn" data-pact="slideshow" ${items.length ? '' : 'disabled'}>▶ Presentazione</button>
+                    <input type="range" min="90" max="300" value="${zoom}" data-zoom aria-label="Dimensione miniature"></div>
+                    <div class="ph-grid" style="--z:${zoom}px">${items.map((p, i) => { const d = when(p), m = d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+                        const head = m !== month ? (month = m, `<h3 class="ph-month">${m}</h3>`) : '';
+                        return head + `<button class="ph-cell ${sel.has(i) ? 'sel' : ''}" data-i="${i}" title="${esc(p.name)}"><img src="${esc(thumbUrl(p.path))}" alt="" loading="lazy" draggable="false">${p.fav ? '<i class="ph-fav">♥</i>' : ''}</button>`; }).join('')
+                        || `<p class="rm-empty">${view === 'library' ? 'Nessuna foto nei tuoi file.<br>Trascina qui delle immagini o usa «Importa foto…».' : 'Nessuna foto.'}</p>`}</div></div></div>`;
+        }
+        const selItems = () => [...sel].map(i => list()[i]).filter(Boolean);
+        // Visore a tutta finestra con frecce, preferito e informazioni
+        function viewer(i) {
+            const items = list(); let cur = i, info = false;
+            const v = document.createElement('div'); v.className = 'ph-viewer'; body.append(v);
+            async function show() {
+                const p = items[cur]; if (!p) return;
+                v.innerHTML = `<div class="ph-v-bar"><button data-v="close" aria-label="Chiudi">‹ Indietro</button><span>${esc(p.name)}<small>${when(p).toLocaleString('it-IT', { dateStyle: 'long', timeStyle: 'short' })}</small></span>
+                    <button data-v="fav" class="${p.fav ? 'on' : ''}" aria-label="Preferito">♥</button><button data-v="edit">Modifica</button><button data-v="info">ⓘ</button></div>
+                    <div class="ph-v-body"><button class="ph-v-nav" data-v="prev" aria-label="Precedente">‹</button><img src="${esc(thumbUrl(p.path, 'm'))}" alt="${esc(p.name)}"><button class="ph-v-nav r" data-v="next" aria-label="Successiva">›</button>
+                    ${info ? `<aside class="ph-info"><b>${esc(p.name)}</b><span>${p.w ? p.w + ' × ' + p.h + ' px · ' : ''}${fmtSize(p.size)}</span><span>${esc(p.path)}</span><div class="ph-exif">Lettura dei dati…</div></aside>` : ''}</div>`;
+                if (info) { try { const x = await api('GET', '/media/photo-info?path=' + encodeURIComponent(p.path)); const el = $('.ph-exif', v); if (el) el.innerHTML = Object.entries({ camera: 'Fotocamera', lens: 'Obiettivo', aperture: 'Diaframma', exposure: 'Esposizione', iso: 'ISO', focal: 'Focale' }).filter(([k]) => x[k]).map(([k, l]) => `<div><small>${l}</small>${esc(String(x[k]))}</div>`).join('') || '<small>Nessun dato della fotocamera</small>'; } catch {} }
+            }
+            v.addEventListener('click', async e => {
+                const a = e.target.closest('[data-v]')?.dataset.v;
+                if (a === 'close') { v.remove(); removeEventListener('keydown', key, true); }
+                if (a === 'prev') { cur = (cur - 1 + items.length) % items.length; show(); }
+                if (a === 'next') { cur = (cur + 1) % items.length; show(); }
+                if (a === 'info') { info = !info; show(); }
+                if (a === 'edit') openPreview(items[cur].name, null, 'img', items[cur].path);
+                if (a === 'fav') { const p = items[cur]; p.fav = !p.fav; await api('POST', '/media/favorite', { path: p.path, on: p.fav }); show(); }
+            });
+            const key = e => { if (!v.isConnected) return removeEventListener('keydown', key, true); if (e.key === 'ArrowRight') { cur = (cur + 1) % items.length; show(); } if (e.key === 'ArrowLeft') { cur = (cur - 1 + items.length) % items.length; show(); } if (e.key === 'Escape') { e.stopPropagation(); v.remove(); removeEventListener('keydown', key, true); draw(); } };
+            addEventListener('keydown', key, true);
+            show();
+        }
+        function slideshow() {
+            const items = list(); if (!items.length) return; let cur = 0;
+            const s = document.createElement('div'); s.className = 'ph-slides'; s.innerHTML = '<img class="a"><img class="b"><small>Esc per uscire</small>'; document.body.append(s);
+            const [a, b] = s.querySelectorAll('img'); let front = a;
+            const next = () => { const back = front === a ? b : a; back.src = thumbUrl(items[cur % items.length].path, 'm'); back.onload = () => { back.classList.add('on'); front.classList.remove('on'); front = back; }; cur++; };
+            next(); const t = setInterval(next, 4000);
+            s.requestFullscreen?.().catch(() => {});
+            const stop = () => { clearInterval(t); s.remove(); document.fullscreenElement && document.exitFullscreen?.(); removeEventListener('keydown', key, true); };
+            const key = e => { if (e.key === 'Escape') { e.stopPropagation(); stop(); } };
+            addEventListener('keydown', key, true); s.addEventListener('click', stop);
+        }
+        async function addToAlbum(paths) {
+            const r = await sheet(win, { title: 'Aggiungi a un album', ok: 'Aggiungi', fields: [{ type: 'select', name: 'album', label: 'Album', value: albums[0]?.id || 'new', options: [...albums.map(a => [a.id, a.name]), ['new', '＋ Nuovo album…']] }] });
+            if (!r) return;
+            try {
+                if (r.album === 'new') { const n = await sheet(win, { title: 'Nuovo album', ok: 'Crea', fields: [{ name: 'name', label: 'Nome', value: 'Nuovo album' }] }); if (!n) return; albums.push(await api('POST', '/media/albums', { name: n.name, items: paths })); }
+                else { const a = albums.find(x => x.id === +r.album); Object.assign(a, await api('PUT', `/media/albums/${a.id}`, { add: paths })); }
+                toast(`Aggiunte ${paths.length} foto all'album`, { app: 'Foto', silent: true }); draw();
+            } catch (e) { toast(e.message, { app: 'Foto' }); }
+        }
+        async function importFiles(files) {
+            if (!files.length) return;
+            try { await api('POST', '/files/folder', { path: '', name: 'Immagini' }).catch(() => {}); const fd = new FormData(); fd.append('path', 'Immagini'); [...files].forEach(f => fd.append('files[]', f));
+                const r = await api('POST', '/files/upload', fd); toast(`Importate ${r.saved.length} foto nella cartella Immagini`, { app: 'Foto' }); filesChanged(); load(); } catch (e) { toast(e.message, { app: 'Foto' }); }
+        }
+        body.addEventListener('click', async e => {
+            const pv = e.target.closest('[data-pv]'); if (pv) { view = pv.dataset.pv; sel.clear(); return draw(); }
+            const a = e.target.closest('[data-pact]')?.dataset.pact;
+            if (a === 'slideshow') return slideshow();
+            if (a === 'new-album') { const r = await sheet(win, { title: 'Nuovo album', ok: 'Crea', fields: [{ name: 'name', label: 'Nome', value: 'Nuovo album' }] }); if (r) { const al = await api('POST', '/media/albums', { name: r.name, items: [] }); albums.push(al); view = 'a' + al.id; draw(); } return; }
+            const c = e.target.closest('.ph-cell'); if (!c) return;
+            const i = +c.dataset.i;
+            if (e.ctrlKey || e.metaKey) sel.has(i) ? sel.delete(i) : sel.add(i);
+            else if (e.shiftKey && anchor != null) { sel.clear(); for (let k = Math.min(anchor, i); k <= Math.max(anchor, i); k++) sel.add(k); }
+            else sel = new Set([i]);
+            anchor = i; body.querySelectorAll('.ph-cell').forEach(x => x.classList.toggle('sel', sel.has(+x.dataset.i)));
+        });
+        body.addEventListener('dblclick', e => { const c = e.target.closest('.ph-cell'); if (c) viewer(+c.dataset.i); });
+        body.addEventListener('keydown', e => { if (e.key === ' ' && sel.size) { e.preventDefault(); viewer([...sel][0]); } });
+        body.addEventListener('input', e => { if (e.target.matches('[data-zoom]')) { zoom = +e.target.value; store.set('photos.zoom', zoom); $('.ph-grid', body).style.setProperty('--z', zoom + 'px'); } });
+        body.addEventListener('change', e => { if (e.target.matches('[data-import]')) importFiles(e.target.files); });
+        body.addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); $('.ph-main', body)?.classList.add('drop'); } });
+        body.addEventListener('dragleave', e => { if (!body.contains(e.relatedTarget)) $('.ph-main', body)?.classList.remove('drop'); });
+        body.addEventListener('drop', e => { if (!e.dataTransfer.files?.length) return; e.preventDefault(); $('.ph-main', body)?.classList.remove('drop'); importFiles(e.dataTransfer.files); });
+        const onFiles = () => { if (!body.isConnected) return removeEventListener('marx:files', onFiles); load(); };
+        addEventListener('marx:files', onFiles);
+        load();
+        return {
+            context: e => {
+                const c = e.target.closest('.ph-cell');
+                if (c) {
+                    const i = +c.dataset.i; if (!sel.has(i)) { sel = new Set([i]); body.querySelectorAll('.ph-cell').forEach(x => x.classList.toggle('sel', sel.has(+x.dataset.i))); }
+                    const ps = selItems(), p = ps[0], album = albums.find(x => 'a' + x.id === view);
+                    return [['Apri', () => viewer(i)], ['Modifica in Anteprima', () => openPreview(p.name, null, 'img', p.path)], '-',
+                        [p.fav ? 'Togli dai preferiti' : 'Aggiungi ai preferiti', async () => { for (const x of ps) { x.fav = !p.fav; await api('POST', '/media/favorite', { path: x.path, on: x.fav }); } draw(); }],
+                        ['Aggiungi a un album…', () => addToAlbum(ps.map(x => x.path))], ...(album ? [['Togli da questo album', async () => { Object.assign(album, await api('PUT', `/media/albums/${album.id}`, { remove: ps.map(x => x.path) })); sel.clear(); draw(); }]] : []), '-',
+                        ['Imposta come sfondo', async () => { try { Object.assign(S, await api('POST', '/settings/wallpaper-from', { path: p.path })); applySettings(); toast('Sfondo aggiornato', { app: 'Foto', silent: true }); } catch (err) { toast(err.message, { app: 'Foto' }); } }],
+                        ['Condividi link…', () => shareLink(win, p.path, p.name)], ['Mostra nel Finder', () => { open('finder'); ctlOf('finder').reveal?.(p.path, 'file'); }], '-',
+                        ['Sposta nel Cestino', async () => { try { const r = await api('DELETE', '/files', { paths: ps.map(x => x.path) }); playSound('trash'); setTrashFull(r.trash); sel.clear(); filesChanged(); } catch (err) { toast(err.message); } }]];
+                }
+                const al = e.target.closest('[data-album]');
+                if (al) { const a = albums.find(x => x.id === +al.dataset.album); return [['Rinomina…', async () => { const r = await sheet(win, { title: 'Rinomina album', ok: 'Salva', fields: [{ name: 'name', label: 'Nome', value: a.name }] }); if (r) { Object.assign(a, await api('PUT', `/media/albums/${a.id}`, { name: r.name })); draw(); } }],
+                    ['Elimina album…', async () => { const ok = await sheet(win, { title: `Eliminare l'album «${a.name}»?`, text: 'Le foto restano nei tuoi file.', ok: 'Elimina', danger: true }); if (ok) { await api('DELETE', `/media/albums/${a.id}`); albums = albums.filter(x => x !== a); view = 'library'; draw(); } }]]; }
+                return [['Importa foto…', () => body.querySelector('[data-import]').click()], ['Presentazione', slideshow]];
+            },
+            menus: () => ({ File: [['Importa foto…', () => body.querySelector('[data-import]').click(), '⌘I'], ['Nuovo album…', () => body.querySelector('[data-pact=new-album]').click()], '-', ['Chiudi finestra', () => close('photos'), '⌘W']],
+                Vista: [[check(view === 'library', 'Libreria'), () => { view = 'library'; draw(); }], [check(view === 'fav', 'Preferiti'), () => { view = 'fav'; draw(); }], '-', ['Presentazione', slideshow]] }),
+        };
+    }
+
+    /* ---------- Anteprima: immagini e PDF con annotazioni ---------- */
+    let pvSeq = 0;
+    function openPreview(name, url, kind, path) {
+        if (!path) {  // file senza percorso (es. condiviso da altri): solo visualizzazione
+            const id = 'preview';
+            if (wins.has(id)) { wins.get(id).remove(); wins.delete(id); }
+            APPS[id] = { name, icon: kind, w: 760, h: 560, hidden: true, render: b => { b.innerHTML = `<div class="preview">${kind === 'img' ? `<img src="${esc(url)}" alt="${esc(name)}">` : `<iframe src="${esc(url)}" title="${esc(name)}"></iframe>`}</div>`; } };
+            return open(id);
+        }
+        const existing = Object.entries(APPS).find(([, a]) => a.pvPath === path);
+        if (existing) return open(existing[0]);
+        const id = 'pv-' + (++pvSeq);
+        APPS[id] = { name: path.split('/').pop(), icon: 'preview', hidden: true, w: 980, h: 700, pvPath: path, render: (b, w) => previewApp(b, w, path, id) };
+        open(id);
+    }
+    function previewApp(body, win, path, id) {
+        const name = path.split('/').pop(), isPdf = /\.pdf$/i.test(name);
+        const ext = name.split('.').pop().toLowerCase();
+        let tool = 'none', color = '#ff3b30', width = 4, dirty = false, zoom = 1, crop = null;
+        let pages = [];  // [{base: canvas, ann: canvas}] — una per l'immagine, una per pagina del PDF
+        const hist = [], future = [];
+        const COLORS = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#0a84ff', '#af52de', '#000000', '#ffffff'];
+        const TOOLS = [['none', '⬚', 'Seleziona'], ['pen', '✎', 'Penna'], ['marker', '▮', 'Evidenziatore'], ['arrow', '➜', 'Freccia'], ['rect', '▭', 'Rettangolo'], ['oval', '◯', 'Ellisse'], ['text', 'T', 'Testo'], ...(isPdf ? [] : [['crop', '⌗', 'Ritaglia']])];
+        body.innerHTML = `<div class="pv">
+            <div class="pv-bar">
+                <div class="seg pv-tools">${TOOLS.map(([k, g, l]) => `<button data-tool="${k}" title="${l}" aria-label="${l}">${g}</button>`).join('')}</div>
+                <div class="pv-colors">${COLORS.map(c => `<button data-color="${c}" style="--c:${c}" aria-label="Colore"></button>`).join('')}</div>
+                <select data-width aria-label="Spessore">${[2, 4, 8, 14].map(w => `<option value="${w}" ${w === width ? 'selected' : ''}>${{ 2: 'Sottile', 4: 'Medio', 8: 'Spesso', 14: 'Molto spesso' }[w]}</option>`).join('')}</select>
+                <span class="pv-sp"></span>
+                <button class="btn" data-pv="undo" title="Annulla (Ctrl+Z)">↶</button><button class="btn" data-pv="redo" title="Ripeti">↷</button>
+                ${isPdf ? '' : '<button class="btn" data-pv="rotl" title="Ruota a sinistra">⟲</button><button class="btn" data-pv="rotr" title="Ruota a destra">⟳</button><button class="btn" data-pv="resize" title="Ridimensiona…">⤢</button>'}
+                <button class="btn" data-pv="apply-crop" hidden>Ritaglia</button>
+                <button class="btn" data-pv="zoomout">−</button><button class="btn" data-pv="zoomin">＋</button>
+                <button class="btn primary" data-pv="save">Salva</button>
+            </div>
+            <div class="pv-main">${isPdf ? '<aside class="pv-thumbs"></aside>' : ''}<div class="pv-scroll"><div class="pv-pages"><p class="rm-empty">Caricamento…</p></div></div></div></div>`;
+        const pagesEl = $('.pv-pages', body);
+        const setTitle = () => { $('.titlebar .title', win).textContent = (dirty ? '● ' : '') + name; };
+        function chrome() {
+            body.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === tool));
+            body.querySelectorAll('[data-color]').forEach(b => b.classList.toggle('on', b.dataset.color === color));
+            $('[data-pv=apply-crop]', body).hidden = !crop;
+            pagesEl.classList.toggle('drawing', tool !== 'none');
+            setTitle();
+        }
+        const cloneCanvas = c => { const n = document.createElement('canvas'); n.width = c.width; n.height = c.height; n.getContext('2d').drawImage(c, 0, 0); return n; };
+        function snapshot() { hist.push(pages.map(p => ({ base: cloneCanvas(p.base), ann: cloneCanvas(p.ann) }))); if (hist.length > 15) hist.shift(); future.length = 0; }
+        function restore(state) { pages.forEach((p, i) => { [['base', state[i].base], ['ann', state[i].ann]].forEach(([k, src]) => { p[k].width = src.width; p[k].height = src.height; p[k].getContext('2d').drawImage(src, 0, 0); }); }); layout(); }
+        function layout() { pages.forEach(p => { const w = p.base.width * zoom * p.fit; [p.base, p.ann, p.over].forEach(c => { c.style.width = w + 'px'; c.style.height = p.base.height * zoom * p.fit + 'px'; }); p.wrap.style.width = w + 'px'; }); }
+        function makePage(img, w, h) {
+            const wrap = document.createElement('div'); wrap.className = 'pv-page';
+            const base = document.createElement('canvas'), ann = document.createElement('canvas'), over = document.createElement('canvas');
+            [base, ann, over].forEach(c => { c.width = w; c.height = h; wrap.append(c); });
+            if (img) base.getContext('2d').drawImage(img, 0, 0, w, h);
+            const page = { wrap, base, ann, over, fit: 1 };
+            hookDrawing(page);
+            return page;
+        }
+        async function load() {
+            pagesEl.innerHTML = '';
+            try {
+                if (isPdf) {
+                    const lib = await pdfjs();
+                    const doc = await lib.getDocument({ url: fileUrl(path, true), withCredentials: true }).promise;
+                    for (let n = 1; n <= doc.numPages; n++) {
+                        const pg = await doc.getPage(n), vp = pg.getViewport({ scale: 1.6 });
+                        const page = makePage(null, Math.floor(vp.width), Math.floor(vp.height));
+                        await pg.render({ canvasContext: page.base.getContext('2d'), viewport: vp }).promise;
+                        page.fit = 1 / 1.6; page.pdfSize = pg.getViewport({ scale: 1 });
+                        pages.push(page); pagesEl.append(page.wrap);
+                        const th = document.createElement('button'); th.className = 'pv-thumb'; th.innerHTML = `<img src="${page.base.toDataURL('image/jpeg', .5)}" alt=""><small>${n}</small>`;
+                        th.onclick = () => page.wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('.pv-thumbs', body).append(th);
+                    }
+                } else {
+                    // Immagine: originale se il browser la sa mostrare, altrimenti (HEIC…) la versione convertita dal server
+                    const src = ['heic', 'heif', 'tif', 'tiff', 'bmp'].includes(ext) ? thumbUrl(path, 'm') : fileUrl(path, true);
+                    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Immagine non leggibile')); i.src = src; });
+                    const page = makePage(img, img.naturalWidth, img.naturalHeight);
+                    pages.push(page); pagesEl.append(page.wrap);
+                    const box = $('.pv-scroll', body); page.fit = Math.min(1, (box.clientWidth - 40) / img.naturalWidth, (box.clientHeight - 40) / img.naturalHeight);
+                }
+                layout(); chrome();
+            } catch (e) { pagesEl.innerHTML = `<p class="rm-empty">${esc(e.message)}</p>`; }
+        }
+        // Disegno sulle pagine: anteprima sul livello «over», conferma sul livello «ann»
+        function hookDrawing(page) {
+            const { over, ann } = page;
+            const pos = e => { const r = over.getBoundingClientRect(); return [(e.clientX - r.left) * over.width / r.width, (e.clientY - r.top) * over.height / r.height]; };
+            const style = (ctx, t) => { ctx.strokeStyle = ctx.fillStyle = color; ctx.lineWidth = width * (over.width / over.getBoundingClientRect().width) * (t === 'marker' ? 4 : 1); ctx.lineCap = ctx.lineJoin = 'round'; ctx.globalAlpha = t === 'marker' ? .35 : 1; };
+            const shape = (ctx, t, a, b, pts) => {
+                ctx.beginPath();
+                if (t === 'pen' || t === 'marker') { pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke(); }
+                if (t === 'rect') ctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+                if (t === 'oval') { ctx.ellipse((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, Math.abs(b[0] - a[0]) / 2, Math.abs(b[1] - a[1]) / 2, 0, 0, Math.PI * 2); ctx.stroke(); }
+                if (t === 'arrow') { const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), hl = ctx.lineWidth * 4; ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(...b); ctx.lineTo(b[0] - hl * Math.cos(ang - .45), b[1] - hl * Math.sin(ang - .45)); ctx.lineTo(b[0] - hl * Math.cos(ang + .45), b[1] - hl * Math.sin(ang + .45)); ctx.closePath(); ctx.fill(); }
+            };
+            over.addEventListener('pointerdown', async e => {
+                if (tool === 'none' || e.button !== 0) return;
+                e.preventDefault(); over.setPointerCapture(e.pointerId);
+                const a = pos(e), pts = [a], octx = over.getContext('2d');
+                if (tool === 'text') {
+                    const r = await sheet(win, { title: 'Testo', ok: 'Inserisci', fields: [{ name: 't', label: 'Scrivi il testo' }] });
+                    if (!r?.t) return;
+                    snapshot(); const ctx = ann.getContext('2d'); style(ctx, 'text'); ctx.globalAlpha = 1;
+                    ctx.font = `600 ${Math.round(ctx.lineWidth * 5 + 10)}px -apple-system, Segoe UI, sans-serif`; ctx.textBaseline = 'top'; ctx.fillText(r.t, a[0], a[1]);
+                    dirty = true; return chrome();
+                }
+                const move = ev => {
+                    const b = pos(ev); pts.push(b);
+                    octx.clearRect(0, 0, over.width, over.height);
+                    if (tool === 'crop') { octx.fillStyle = 'rgba(0,0,0,.45)'; octx.fillRect(0, 0, over.width, over.height); octx.clearRect(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])); crop = { page, a, b }; return; }
+                    style(octx, tool); shape(octx, tool, a, b, pts);
+                };
+                const up = ev => {
+                    over.removeEventListener('pointermove', move); over.removeEventListener('pointerup', up);
+                    if (tool === 'crop') return chrome();
+                    octx.clearRect(0, 0, over.width, over.height);
+                    if (pts.length < 2) return;
+                    snapshot(); const ctx = ann.getContext('2d'); style(ctx, tool); shape(ctx, tool, a, pos(ev), pts); ctx.globalAlpha = 1;
+                    dirty = true; chrome();
+                };
+                over.addEventListener('pointermove', move); over.addEventListener('pointerup', up);
+            });
+        }
+        // Operazioni sull'immagine: le annotazioni vengono prima fuse nell'immagine
+        function flatten(p) { p.base.getContext('2d').drawImage(p.ann, 0, 0); p.ann.getContext('2d').clearRect(0, 0, p.ann.width, p.ann.height); }
+        function transform(fn) {
+            const p = pages[0]; snapshot(); flatten(p);
+            const src = cloneCanvas(p.base), [w, h, draw] = fn(src);
+            [p.base, p.ann, p.over].forEach(c => { c.width = w; c.height = h; });
+            draw(p.base.getContext('2d'));
+            const box = $('.pv-scroll', body); p.fit = Math.min(1, (box.clientWidth - 40) / w, (box.clientHeight - 40) / h);
+            dirty = true; layout(); chrome();
+        }
+        const rotate = dir => transform(src => [src.height, src.width, ctx => { ctx.translate(dir > 0 ? src.height : 0, dir > 0 ? 0 : src.width); ctx.rotate(dir * Math.PI / 2); ctx.drawImage(src, 0, 0); }]);
+        function applyCrop() {
+            if (!crop) return; const { a, b } = crop; crop = null; pages[0].over.getContext('2d').clearRect(0, 0, pages[0].over.width, pages[0].over.height);
+            const x = Math.max(0, Math.min(a[0], b[0])), y = Math.max(0, Math.min(a[1], b[1])), w = Math.abs(b[0] - a[0]), h = Math.abs(b[1] - a[1]);
+            if (w < 4 || h < 4) return chrome();
+            transform(src => [Math.round(w), Math.round(h), ctx => ctx.drawImage(src, x, y, w, h, 0, 0, w, h)]); tool = 'none'; chrome();
+        }
+        async function resize() {
+            const p = pages[0];
+            const r = await sheet(win, { title: 'Ridimensiona', ok: 'Applica', text: `Dimensioni attuali: ${p.base.width} × ${p.base.height} px. L'altezza segue le proporzioni.`, fields: [{ name: 'w', label: 'Larghezza in pixel', type: 'number', value: p.base.width }] });
+            const nw = Math.round(+r?.w); if (!nw || nw < 8 || nw > 12000) return;
+            const nh = Math.round(p.base.height * nw / p.base.width);
+            transform(src => [nw, nh, ctx => { ctx.imageSmoothingQuality = 'high'; ctx.drawImage(src, 0, 0, nw, nh); }]);
+        }
+        async function save() {
+            const r = await sheet(win, { title: 'Salva', ok: 'Salva una copia', text: 'Puoi salvare una copia accanto all\'originale oppure sostituire il file.', extra: { label: 'Sostituisci l\'originale' },
+                fields: [{ name: 'name', label: 'Nome della copia', value: name.replace(/(\.[^.]+)$/, (isPdf ? ' annotato' : ' annotata') + '$1').replace(/\.(heic|heif|tif|tiff|bmp)$/i, '.jpg') }] });
+            if (!r) return;
+            const overwrite = !!r.__extra;
+            const dir = path.split('/').slice(0, -1).join('/');
+            let target = overwrite ? path : (dir ? dir + '/' : '') + r.name;
+            try {
+                let blob;
+                if (isPdf) {
+                    await loadScript('https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js');
+                    const bytes = await (await fetch(fileUrl(path, true), { credentials: 'same-origin' })).arrayBuffer();
+                    const doc = await window.PDFLib.PDFDocument.load(bytes), docPages = doc.getPages();
+                    for (let i = 0; i < pages.length; i++) {
+                        const c = pages[i].ann; if (!c.getContext('2d').getImageData(0, 0, c.width, c.height).data.some(v => v)) continue;  // pagina senza annotazioni
+                        const png = await doc.embedPng(c.toDataURL('image/png')), pg = docPages[i], { width: w, height: h } = pg.getSize();
+                        pg.drawImage(png, { x: 0, y: 0, width: w, height: h });
+                    }
+                    blob = new Blob([await doc.save()], { type: 'application/pdf' });
+                    if (!overwrite && !/\.pdf$/i.test(target)) target += '.pdf';
+                } else {
+                    const p = pages[0], out = cloneCanvas(p.base); out.getContext('2d').drawImage(p.ann, 0, 0);
+                    const t = /\.png$/i.test(target) ? 'image/png' : /\.webp$/i.test(target) ? 'image/webp' : 'image/jpeg';
+                    if (overwrite && ['heic', 'heif', 'tif', 'tiff', 'bmp', 'gif', 'svg', 'avif'].includes(ext)) target = path.replace(/\.[^.]+$/, '.png');
+                    blob = await new Promise(res => out.toBlob(res, /\.png$/i.test(target) ? 'image/png' : t, .92));
+                }
+                const fd = new FormData(); fd.append('path', target); fd.append('file', blob, target.split('/').pop());
+                await api('POST', '/files/save-binary', fd);
+                dirty = false; chrome(); filesChanged(); toast(`Salvato «${target.split('/').pop()}»`, { app: 'Anteprima', silent: true });
+                return true;
+            } catch (e) { toast(e.message, { app: 'Anteprima' }); return false; }
+        }
+        body.addEventListener('click', e => {
+            const t = e.target.closest('[data-tool]'); if (t) { tool = t.dataset.tool; if (tool !== 'crop' && crop) { crop = null; pages[0]?.over.getContext('2d').clearRect(0, 0, 1e5, 1e5); } return chrome(); }
+            const c = e.target.closest('[data-color]'); if (c) { color = c.dataset.color; if (tool === 'none') tool = 'pen'; return chrome(); }
+            const a = e.target.closest('[data-pv]')?.dataset.pv;
+            if (a === 'undo' && hist.length) { future.push(pages.map(p => ({ base: cloneCanvas(p.base), ann: cloneCanvas(p.ann) }))); restore(hist.pop()); dirty = true; chrome(); }
+            if (a === 'redo' && future.length) { hist.push(pages.map(p => ({ base: cloneCanvas(p.base), ann: cloneCanvas(p.ann) }))); restore(future.pop()); chrome(); }
+            if (a === 'rotl') rotate(-1); if (a === 'rotr') rotate(1);
+            if (a === 'resize') resize(); if (a === 'apply-crop') applyCrop();
+            if (a === 'zoomin') { zoom = Math.min(4, zoom * 1.25); layout(); } if (a === 'zoomout') { zoom = Math.max(.2, zoom / 1.25); layout(); }
+            if (a === 'save') save();
+        });
+        body.addEventListener('change', e => { if (e.target.matches('[data-width]')) width = +e.target.value; });
+        body.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); $(`[data-pv=${e.shiftKey ? 'redo' : 'undo'}]`, body).click(); } if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); } });
+        load();
+        return {
+            confirmClose: async () => {
+                if (!dirty) return true;
+                const r = await sheet(win, { title: `Salvare le modifiche a «${name}»?`, text: 'Se non salvi, le annotazioni andranno perse.', ok: 'Salva…', extra: { label: 'Non salvare', danger: true } });
+                if (!r) return false; if (r.__extra) return true; return save();
+            },
+            menus: () => ({
+                File: [['Salva…', save, '⌘S'], ['Scarica originale', () => { location.href = fileUrl(path); }], ['Mostra nel Finder', () => { open('finder'); ctlOf('finder').reveal?.(path, 'file'); }], '-', ['Chiudi', () => close(id), '⌘W']],
+                Strumenti: TOOLS.map(([k, , l]) => [check(tool === k, l), () => { tool = k; chrome(); }]),
+                ...(isPdf ? {} : { Immagine: [['Ruota a sinistra', () => rotate(-1)], ['Ruota a destra', () => rotate(1)], ['Ridimensiona…', resize], ['Ritaglia selezione', crop && applyCrop]] }),
+            }),
+        };
+    }
+
+    /* ---------- Musica: lettore unico, che continua anche a finestra chiusa ---------- */
+    const player = { audio: new Audio(), queue: [], i: -1, shuffle: false, repeat: 'off', listeners: new Set() };
+    player.audio.preload = 'metadata';
+    player.audio.volume = store.get('music.volume', .8);
+    const track = () => player.queue[player.i];
+    const notifyPlayer = () => { player.listeners.forEach(fn => { try { fn(); } catch {} }); drawMiniPlayer(); };
+    const coverUrl = t => t?.cover ? '/media/cover?path=' + encodeURIComponent(t.path) : null;
+    const fmtDur = s => s == null || !isFinite(s) ? '—' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+    function playQueue(list, start = 0) {
+        player.queue = [...list]; player.i = start;
+        if (player.shuffle) { const cur = player.queue.splice(start, 1)[0]; player.queue.sort(() => Math.random() - .5); player.queue.unshift(cur); player.i = 0; }
+        loadTrack(true);
+    }
+    function loadTrack(autoplay) {
+        const t = track(); if (!t) return;
+        player.audio.src = fileUrl(t.path, true);
+        if (autoplay) player.audio.play().catch(() => {});
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({ title: t.title || t.name, artist: t.artist || '', album: t.album || '', artwork: coverUrl(t) ? [{ src: coverUrl(t), sizes: '400x400', type: 'image/jpeg' }] : [] });
+        }
+        notifyPlayer();
+    }
+    const nextTrack = () => { if (!player.queue.length) return; if (player.i < player.queue.length - 1) player.i++; else if (player.repeat === 'all') player.i = 0; else return; loadTrack(true); };
+    const prevTrack = () => { if (player.audio.currentTime > 3) { player.audio.currentTime = 0; return; } if (player.i > 0) { player.i--; loadTrack(true); } };
+    const togglePlay = () => { if (!track()) return; player.audio.paused ? player.audio.play().catch(() => {}) : player.audio.pause(); };
+    player.audio.addEventListener('ended', () => { if (player.repeat === 'one') { player.audio.currentTime = 0; player.audio.play(); } else nextTrack(); });
+    ['play', 'pause', 'timeupdate', 'loadedmetadata'].forEach(ev => player.audio.addEventListener(ev, () => { player.listeners.forEach(fn => { try { fn(ev); } catch {} }); if (ev !== 'timeupdate') drawMiniPlayer(); }));
+    if ('mediaSession' in navigator) {
+        navigator.mediaSession.setActionHandler('play', togglePlay); navigator.mediaSession.setActionHandler('pause', togglePlay);
+        navigator.mediaSession.setActionHandler('nexttrack', nextTrack); navigator.mediaSession.setActionHandler('previoustrack', prevTrack);
+    }
+    // Mini lettore: icona nella barra dei menu con controlli
+    function drawMiniPlayer() {
+        let btn = $('#musicMini');
+        if (!btn) { btn = document.createElement('button'); btn.id = 'musicMini'; btn.className = 'menu-icon'; btn.setAttribute('aria-label', 'Musica in riproduzione'); $('#spotlightBtn').before(btn);
+            btn.onclick = e => { e.stopPropagation(); miniPop(btn); }; }
+        const t = track();
+        btn.hidden = !t;
+        btn.innerHTML = player.audio.paused ? '♪' : '<span class="eq"><i></i><i></i><i></i></span>';
+        const pop = $('.music-pop'); if (pop) fillMini(pop);
+    }
+    function fillMini(pop) {
+        const t = track(); if (!t) return pop.remove();
+        pop.innerHTML = `<div class="mp-row">${coverUrl(t) ? `<img src="${esc(coverUrl(t))}" alt="">` : '<span class="ico ico-music"></span>'}<div><b>${esc(t.title || t.name)}</b><small>${esc(t.artist || '')}</small></div></div>
+            <div class="mp-ctl"><button data-m="prev">⏮</button><button data-m="play">${player.audio.paused ? '▶' : '⏸'}</button><button data-m="next">⏭</button><button data-m="open" title="Apri Musica">♫</button></div>`;
+    }
+    function miniPop(anchor) {
+        if ($('.music-pop')) return $('.music-pop').remove();
+        closePanels();
+        const pop = document.createElement('div'); pop.className = 'music-pop'; document.body.append(pop); fillMini(pop);
+        const r = anchor.getBoundingClientRect(); pop.style.right = Math.max(8, innerWidth - r.right - 60) + 'px';
+        pop.onclick = e => { e.stopPropagation(); const m = e.target.closest('[data-m]')?.dataset.m; if (m === 'prev') prevTrack(); if (m === 'next') nextTrack(); if (m === 'play') togglePlay(); if (m === 'open') { pop.remove(); open('music'); } };
+        setTimeout(() => addEventListener('pointerdown', function off(ev) { if (!pop.contains(ev.target) && ev.target !== anchor) { pop.remove(); removeEventListener('pointerdown', off, true); } }, true));
+    }
+    function playFile(p) {  // dal Finder: riproduce subito il brano, con i dati della libreria se disponibili
+        api('GET', '/media/music').then(d => { const all = d.tracks, i = all.findIndex(t => t.path === p); if (i >= 0) playQueue(all, i); else playQueue([{ path: p, name: p.split('/').pop(), title: p.split('/').pop() }]); }).catch(() => playQueue([{ path: p, title: p.split('/').pop() }]));
+    }
+    function music(body, win) {
+        let tracks = [], playlists = [], view = store.get('music.view', 'songs'), query = '', openAlbum = null;
+        async function load() {
+            try { const d = await api('GET', '/media/music'); tracks = d.tracks; playlists = d.playlists; } catch (e) { return toast(e.message, { app: 'Musica' }); }
+            draw();
+        }
+        const byKey = k => { const m = new Map(); tracks.forEach(t => { const key = t[k] || (k === 'artist' ? 'Artista sconosciuto' : 'Album sconosciuto'); (m.get(key) || m.set(key, []).get(key)).push(t); }); return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'it')); };
+        const filtered = list => !query ? list : list.filter(t => [t.title, t.artist, t.album, t.name].join(' ').toLowerCase().includes(query.toLowerCase()));
+        function songTable(list) {
+            return `<div class="mu-table"><div class="mu-row mu-head"><span>#</span><span>Titolo</span><span>Artista</span><span>Album</span><span>Durata</span></div>
+                ${list.map((t, i) => `<div class="mu-row ${track()?.path === t.path ? 'playing' : ''}" data-ti="${i}"><span>${track()?.path === t.path && !player.audio.paused ? '<span class="eq"><i></i><i></i><i></i></span>' : t.track || i + 1}</span><span>${esc(t.title || t.name)}</span><span>${esc(t.artist || '—')}</span><span>${esc(t.album || '—')}</span><span>${fmtDur(t.duration)}</span></div>`).join('')}</div>`;
+        }
+        let current = [];  // elenco mostrato (per riprodurre «da qui in poi»)
+        function draw() {
+            let main;
+            if (view === 'songs') { current = filtered(tracks); main = songTable(current); }
+            else if (view === 'albums' && !openAlbum) { main = `<div class="mu-albums">${byKey('album').map(([al, list]) => `<button class="mu-album" data-album="${esc(al)}">${coverUrl(list.find(t => t.cover)) ? `<img src="${esc(coverUrl(list.find(t => t.cover)))}" alt="" loading="lazy">` : '<span class="mu-nocover">♫</span>'}<b>${esc(al)}</b><small>${esc(list[0].artist || '')}</small></button>`).join('')}</div>`; current = []; }
+            else if (view === 'albums') { current = filtered(tracks.filter(t => (t.album || 'Album sconosciuto') === openAlbum)); main = `<button class="as-back" data-mact="back">‹ Album</button><h3>${esc(openAlbum)}</h3>` + songTable(current); }
+            else if (view === 'artists') { main = byKey('artist').map(([ar, list]) => `<h3 class="mu-artist">${esc(ar)}</h3>` + songTable(filtered(list))).join(''); current = filtered(byKey('artist').flatMap(([, l]) => l)); }
+            else { const pl = playlists.find(p => 'p' + p.id === view); current = filtered((pl?.items || []).map(p => tracks.find(t => t.path === p)).filter(Boolean)); main = `<h3>${esc(pl?.name || '')}</h3>` + (current.length ? songTable(current) : '<p class="rm-empty">Playlist vuota. Tasto destro su un brano › Aggiungi a playlist.</p>'); }
+            if (!tracks.length) main = '<p class="rm-empty">Nessun brano nei tuoi file.<br>Carica file audio (MP3, M4A, FLAC, OGG, WAV) nel Finder: compariranno qui da soli.</p>';
+            body.innerHTML = `<div class="mu">
+                <aside class="sidebar mu-side"><div class="as-search"><input id="muSearch" type="search" placeholder="Cerca" value="${esc(query)}" autocomplete="off"></div><h4>Libreria</h4>
+                    ${[['songs', 'Brani'], ['artists', 'Artisti'], ['albums', 'Album']].map(([k, l]) => `<button class="${view === k ? 'active' : ''}" data-mv="${k}">${l}</button>`).join('')}
+                    <h4>Playlist</h4>${playlists.map(p => `<button class="${view === 'p' + p.id ? 'active' : ''}" data-mv="p${p.id}" data-pl="${p.id}">${esc(p.name)}</button>`).join('')}
+                    <button class="rm-add-list" data-mact="new-pl">＋ Nuova playlist</button></aside>
+                <div class="mu-main">${main}</div>
+                <div class="mu-bar"></div></div>`;
+            drawBar();
+            const s = $('#muSearch', body); s.oninput = () => { query = s.value; const pos = s.selectionStart; draw(); const n = $('#muSearch', body); n.focus(); n.setSelectionRange(pos, pos); };
+        }
+        function drawBar(ev) {
+            const bar = $('.mu-bar', body); if (!bar) return;
+            const t = track(), a = player.audio;
+            if (ev === 'timeupdate' && bar.querySelector('[data-seek]')) { const sk = bar.querySelector('[data-seek]'); if (!sk.matches(':active')) sk.value = a.currentTime || 0; bar.querySelector('.mu-time').textContent = `${fmtDur(a.currentTime)} / ${fmtDur(a.duration)}`; return; }
+            bar.innerHTML = `<div class="mu-now">${t ? `${coverUrl(t) ? `<img src="${esc(coverUrl(t))}" alt="">` : '<span class="mu-nocover sm">♫</span>'}<div><b>${esc(t.title || t.name)}</b><small>${esc([t.artist, t.album].filter(Boolean).join(' — '))}</small></div>` : '<small class="sub">Scegli un brano</small>'}</div>
+                <div class="mu-ctl"><button data-p="shuffle" class="${player.shuffle ? 'on' : ''}" title="Casuale">⤮</button><button data-p="prev">⏮</button><button data-p="play" class="big">${a.paused ? '▶' : '⏸'}</button><button data-p="next">⏭</button>
+                    <button data-p="repeat" class="${player.repeat !== 'off' ? 'on' : ''}" title="Ripeti">${player.repeat === 'one' ? '🔂' : '🔁'}</button>
+                    <input type="range" data-seek min="0" max="${a.duration || 0}" step="0.1" value="${a.currentTime || 0}" aria-label="Posizione"><span class="mu-time">${fmtDur(a.currentTime)} / ${fmtDur(a.duration)}</span></div>
+                <div class="mu-vol">🔈<input type="range" data-vol min="0" max="1" step="0.01" value="${a.volume}" aria-label="Volume"></div>`;
+        }
+        const listener = ev => { if (!body.isConnected) return player.listeners.delete(listener); if (ev === 'timeupdate') drawBar(ev); else { drawBar(); body.querySelectorAll('.mu-row[data-ti]').forEach(r => r.classList.toggle('playing', current[+r.dataset.ti]?.path === track()?.path)); } };
+        player.listeners.add(listener);
+        body.addEventListener('click', async e => {
+            const mv = e.target.closest('[data-mv]'); if (mv) { view = mv.dataset.mv; openAlbum = null; store.set('music.view', view); return draw(); }
+            const al = e.target.closest('[data-album]'); if (al) { openAlbum = al.dataset.album; return draw(); }
+            const a = e.target.closest('[data-mact]')?.dataset.mact;
+            if (a === 'back') { openAlbum = null; return draw(); }
+            if (a === 'new-pl') { const r = await sheet(win, { title: 'Nuova playlist', ok: 'Crea', fields: [{ name: 'name', label: 'Nome', value: 'Nuova playlist' }] }); if (r) { const p = await api('POST', '/media/playlists', { name: r.name, items: [] }); playlists.push(p); view = 'p' + p.id; draw(); } return; }
+            const p = e.target.closest('[data-p]')?.dataset.p;
+            if (p === 'play') { if (!track() && current.length) playQueue(current, 0); else togglePlay(); }
+            if (p === 'next') nextTrack(); if (p === 'prev') prevTrack();
+            if (p === 'shuffle') { player.shuffle = !player.shuffle; drawBar(); }
+            if (p === 'repeat') { player.repeat = { off: 'all', all: 'one', one: 'off' }[player.repeat]; drawBar(); }
+        });
+        body.addEventListener('dblclick', e => { const r = e.target.closest('.mu-row[data-ti]'); if (r) playQueue(current, +r.dataset.ti); });
+        body.addEventListener('input', e => {
+            if (e.target.matches('[data-seek]')) player.audio.currentTime = +e.target.value;
+            if (e.target.matches('[data-vol]')) { player.audio.volume = +e.target.value; store.set('music.volume', player.audio.volume); }
+        });
+        const onFiles = () => { if (!body.isConnected) return removeEventListener('marx:files', onFiles); load(); };
+        addEventListener('marx:files', onFiles);
+        load();
+        return {
+            context: e => {
+                const r = e.target.closest('.mu-row[data-ti]');
+                if (r) { const t = current[+r.dataset.ti], pl = playlists.find(p => 'p' + p.id === view);
+                    return [['Riproduci', () => playQueue(current, +r.dataset.ti)], ['Riproduci dopo', () => { if (!track()) return playQueue([t]); player.queue.splice(player.i + 1, 0, t); toast('Aggiunto alla coda', { app: 'Musica', silent: true }); }], '-',
+                        ...playlists.map(p => [`Aggiungi a «${p.name}»`, async () => { Object.assign(p, await api('PUT', `/media/playlists/${p.id}`, { items: [...(p.items || []), t.path] })); toast(`Aggiunto a «${p.name}»`, { app: 'Musica', silent: true }); }]),
+                        ...(pl ? [['Togli da questa playlist', async () => { Object.assign(pl, await api('PUT', `/media/playlists/${pl.id}`, { items: pl.items.filter(x => x !== t.path) })); draw(); }]] : []), '-',
+                        ['Mostra nel Finder', () => { open('finder'); ctlOf('finder').reveal?.(t.path, 'file'); }]]; }
+                const pe = e.target.closest('[data-pl]');
+                if (pe) { const p = playlists.find(x => x.id === +pe.dataset.pl); return [['Riproduci', () => { const l = (p.items || []).map(x => tracks.find(t => t.path === x)).filter(Boolean); l.length && playQueue(l); }], ['Rinomina…', async () => { const r = await sheet(win, { title: 'Rinomina playlist', ok: 'Salva', fields: [{ name: 'name', label: 'Nome', value: p.name }] }); if (r) { Object.assign(p, await api('PUT', `/media/playlists/${p.id}`, { name: r.name })); draw(); } }],
+                    ['Elimina playlist…', async () => { const ok = await sheet(win, { title: `Eliminare «${p.name}»?`, text: 'I brani restano nei tuoi file.', ok: 'Elimina', danger: true }); if (ok) { await api('DELETE', `/media/playlists/${p.id}`); playlists = playlists.filter(x => x !== p); view = 'songs'; draw(); } }]]; }
+                return null;
+            },
+            menus: () => ({
+                Controlli: [[player.audio.paused ? 'Riproduci' : 'Pausa', track() && togglePlay, 'Spazio'], ['Successivo', track() && nextTrack, '⌘→'], ['Precedente', track() && prevTrack, '⌘←'], '-',
+                    [check(player.shuffle, 'Casuale'), () => { player.shuffle = !player.shuffle; drawBar(); }], [check(player.repeat !== 'off', player.repeat === 'one' ? 'Ripeti brano' : 'Ripeti tutto'), () => { player.repeat = { off: 'all', all: 'one', one: 'off' }[player.repeat]; drawBar(); }]],
+                Vista: [['songs', 'Brani'], ['artists', 'Artisti'], ['albums', 'Album']].map(([k, l]) => [check(view === k, l), () => { view = k; openAlbum = null; draw(); }]),
+            }),
         };
     }
 
@@ -3282,6 +3769,16 @@
     const deskView = desktopFiles(); deskView.load();
     loadWebApps().finally(() => {
         // App web fissate con la versione precedente (salvate solo nel browser): passano nel Dock dell'account
+        if (Array.isArray(S.dockApps) && S.dockApps.length) {
+            const known = S.dockKnown || DOCK_DEFAULT.filter(id => !['photos', 'music'].includes(id));
+            const fresh = DOCK_DEFAULT.filter(id => !known.includes(id) && !S.dockApps.includes(id));
+            if (fresh.length) {
+                const at = Math.max(1, S.dockApps.indexOf('webx') >= 0 ? S.dockApps.indexOf('webx') : S.dockApps.length);
+                saveDockApps([...S.dockApps.slice(0, at), ...fresh, ...S.dockApps.slice(at)]);
+            }
+            if (!S.dockKnown || fresh.length) setSetting('dockKnown', DOCK_DEFAULT);
+            updateDock();
+        }
         const old = store.get('dockPins', []).filter(id => APPS[id]);
         if (old.length) { saveDockApps([...dockApps(), ...old]); store.set('dockPins', []); updateDock(); }
         if (S.restoreWindows) restoreSession();
@@ -3302,7 +3799,7 @@
     tick(); setInterval(tick, 1000);
 
     /* ---------- Dock personalizzabile (salvato nell'account) ---------- */
-    var DOCK_DEFAULT = ['finder', 'launchpad', 'notes', 'reminders', 'contacts', 'webx', 'calculator', 'calendar', 'settings', ...(MARX.user.is_admin ? ['appstore', 'activity'] : [])];
+    var DOCK_DEFAULT = ['finder', 'launchpad', 'notes', 'reminders', 'contacts', 'photos', 'music', 'webx', 'calculator', 'calendar', 'settings', ...(MARX.user.is_admin ? ['appstore', 'activity'] : [])];
     var DOCK_FIXED = ['finder'];  // come sul Mac, il Finder non si toglie
     function dockApps() { return (Array.isArray(S.dockApps) && S.dockApps.length ? S.dockApps : DOCK_DEFAULT).filter(id => APPS[id]); }
     function dockStack() { return Array.isArray(S.dockStack) ? S.dockStack : []; }
@@ -3314,7 +3811,7 @@
     var stackHTML = s => `<button class="dock-item dock-stack" data-stack-path="${esc(s.path)}" data-stack-type="${s.type}" data-label="${esc(s.path.split('/').pop())}">${s.type === 'folder' ? '<span class="ico ico-folder"></span>' : fileIcon({ name: s.path, type: 'file' })}</button>`;
     var lastTrash = 0;
     function runningIds() {
-        return [...new Set([...wins.keys()].map(k => (k.startsWith('te-') ? 'textedit' : k)))].filter(k => APPS[k] && !APPS[k].special && (!APPS[k].hidden || k === 'textedit'));
+        return [...new Set([...wins.keys()].map(k => (k.startsWith('te-') ? 'textedit' : k.startsWith('pv-') ? 'preview-app' : k)))].filter(k => APPS[k] && !APPS[k].special && (!APPS[k].hidden || k === 'textedit' || k === 'preview-app'));
     }
     function updateDock() {
         const dock = $('#dock'); if (!dock || dock.classList.contains('dragging')) return;
@@ -3330,7 +3827,8 @@
     function openPath(p, type) {
         if (type === 'folder') { open('finder'); return ctlOf('finder').go?.('files', p); }
         const name = p.split('/').pop(), k = kindOf(name, 'file');
-        if (k === 'img' || k === 'pdf') return openPreview(name, fileUrl(p, true), k);
+        if (k === 'img' || k === 'pdf') return openPreview(name, fileUrl(p, true), k, p);
+        if (k === 'audio') return playFile(p);
         if (k === 'text') return openTextEdit(p);
         quickLook([qlItem({ name, type: 'file' }, p)]);
     }

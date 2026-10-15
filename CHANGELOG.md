@@ -3,6 +3,13 @@
 La versione corrente è in `config/marx.php`.
 Formato: MAGGIORE.MINORE.CORREZIONE. Ogni gruppo di funzioni nuove aumenta il numero MINORE; le sole correzioni aumentano CORREZIONE.
 
+## 0.11.0 «Media» — 2026-10-15
+- Foto: tutte le immagini dei tuoi file (anche HEIC dell'iPhone) in una libreria per mese, con anteprime veloci; visore con frecce e dati dello scatto; preferiti, album, presentazione a schermo intero; importazione trascinando le foto; «Imposta come sfondo».
+- Anteprima: immagini e PDF con annotazioni (penna, evidenziatore, frecce, rettangoli, ellissi, testo), colori e spessori, annulla e ripeti; sulle immagini ritaglio, rotazione e ridimensionamento; salvataggio come copia o sostituendo l'originale (i PDF annotati restano PDF).
+- Musica: libreria dei file audio per brani, artisti e album con copertine; lettore con coda, casuale e ripeti; playlist; la musica continua a finestra chiusa con il mini lettore nella barra dei menu; tasti multimediali.
+- Dal Finder e dalla scrivania: immagini e PDF si aprono in Anteprima, i brani in Musica.
+- Le app nuove compaiono nel Dock anche se lo avevi già personalizzato.
+
 ## 0.10.2 — 2026-10-15
 - Le cartelle della barra laterale del Finder (es. «Scrivania») e del percorso in alto si possono trascinare nel Dock, come sul Mac.
 

@@ -6,6 +6,7 @@ use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\FileController;
+use App\Http\Controllers\MediaController;
 use App\Http\Controllers\NoteController;
 use App\Http\Controllers\ReminderController;
 use App\Http\Controllers\SearchController;
@@ -56,6 +57,21 @@ Route::middleware('auth')->group(function () {
     Route::post('/files/duplicate', [FileController::class, 'duplicate']);
     Route::get('/files/text', [FileController::class, 'text']);
     Route::post('/files/save', [FileController::class, 'save']);
+    Route::post('/files/save-binary', [FileController::class, 'saveBinary']);
+    Route::post('/settings/wallpaper-from', [SettingsController::class, 'wallpaperFromFile']);
+
+    Route::get('/media/photos', [MediaController::class, 'photos']);
+    Route::get('/media/thumb', [MediaController::class, 'thumb']);
+    Route::get('/media/photo-info', [MediaController::class, 'photoInfo']);
+    Route::post('/media/favorite', [MediaController::class, 'favorite']);
+    Route::post('/media/albums', [MediaController::class, 'storeAlbum']);
+    Route::put('/media/albums/{id}', [MediaController::class, 'updateAlbum'])->whereNumber('id');
+    Route::delete('/media/albums/{id}', [MediaController::class, 'destroyAlbum'])->whereNumber('id');
+    Route::get('/media/music', [MediaController::class, 'music']);
+    Route::get('/media/cover', [MediaController::class, 'cover']);
+    Route::post('/media/playlists', [MediaController::class, 'storePlaylist']);
+    Route::put('/media/playlists/{id}', [MediaController::class, 'updatePlaylist'])->whereNumber('id');
+    Route::delete('/media/playlists/{id}', [MediaController::class, 'destroyPlaylist'])->whereNumber('id');
 
     Route::get('/reminders', [ReminderController::class, 'index']);
     Route::post('/reminders', [ReminderController::class, 'store']);
