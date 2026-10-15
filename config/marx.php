@@ -5,7 +5,7 @@
  * Ad ogni rilascio: aggiornare qui e aggiungere una voce in CHANGELOG.md.
  */
 return [
-    'version' => '0.9.0',
+    'version' => '0.9.1',
     'codename' => 'File',
     'released' => '2026-10-15',
 ];
