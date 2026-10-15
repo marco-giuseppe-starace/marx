@@ -179,6 +179,9 @@
         contacts:   { name: 'Contatti',     icon: 'contacts', w: 900, h: 600, render: contacts },
         photos:     { name: 'Foto',         icon: 'photos',   w: 1060, h: 700, render: photos },
         music:      { name: 'Musica',       icon: 'music',    w: 1000, h: 660, render: music },
+        weather:    { name: 'Meteo',        icon: 'weather',  w: 980, h: 680, render: weather },
+        maps:       { name: 'Mappe',        icon: 'maps',     w: 1100, h: 720, render: maps },
+        clock:      { name: 'Orologio',     icon: 'clock',    w: 860, h: 600, render: clock },
         'preview-app': { name: 'Anteprima', icon: 'preview', hidden: true, render: b => { b.innerHTML = '<p class="rm-empty">Apri un\'immagine o un PDF dal Finder o da Foto per modificarlo in Anteprima.</p>'; } },
         textedit:   { name: 'TextEdit',     icon: 'textedit', w: 760, h: 560, render: (b, w) => textEditor(b, w, null) },
         calendar:   { name: 'Calendario',   icon: 'calendar', w: 1000, h: 660, render: calendar },
@@ -2042,7 +2045,7 @@
         function detail(c) {
             if (!c) return `<div class="ctc-empty">${list.length ? 'Seleziona un contatto' : 'Nessun contatto.<br>Premi ＋ per crearne uno, oppure importa un file vCard (.vcf) da iPhone, Android o Outlook.'}</div>`;
             if (editing) return form(c);
-            const rows = (arr, kind) => (arr || []).map(x => `<div class="ctc-row"><small>${esc(x.label || kind)}</small>${kind === 'email' ? `<a href="mailto:${esc(x.value)}">${esc(x.value)}</a>` : kind === 'telefono' ? `<a href="tel:${esc(x.value.replace(/\s/g, ''))}">${esc(x.value)}</a>` : `<span>${esc(x.value).replace(/\n/g, '<br>')}</span><a class="ctc-map" href="https://www.openstreetmap.org/search?query=${encodeURIComponent(x.value)}" target="_blank" rel="noopener">Mappa</a>`}</div>`).join('');
+            const rows = (arr, kind) => (arr || []).map(x => `<div class="ctc-row"><small>${esc(x.label || kind)}</small>${kind === 'email' ? `<a href="mailto:${esc(x.value)}">${esc(x.value)}</a>` : kind === 'telefono' ? `<a href="tel:${esc(x.value.replace(/\s/g, ''))}">${esc(x.value)}</a>` : `<span>${esc(x.value).replace(/\n/g, '<br>')}</span><button class="ctc-map" data-map="${esc(x.value)}">Mappa</button>`}</div>`).join('');
             return `<div class="ctc">
                 <div class="ctc-head">${avatar(c, true)}<h2>${esc(nameOf(c))}${c.favorite ? ' <span class="ctc-fav">★</span>' : ''}</h2><p>${esc([c.job_title, c.company].filter(Boolean).join(' · '))}</p>
                     <div class="ctc-quick">${c.phones?.[0] ? `<a class="btn" href="tel:${esc(c.phones[0].value.replace(/\s/g, ''))}">Chiama</a>` : ''}${c.emails?.[0] ? `<a class="btn" href="mailto:${esc(c.emails[0].value)}">Email</a>` : ''}</div></div>
@@ -2090,6 +2093,7 @@
             const it = e.target.closest('[data-cid]'); if (it) { sel = +it.dataset.cid; editing = false; return draw(); }
             const add = e.target.closest('[data-add]'); if (add) { add.insertAdjacentHTML('beforebegin', rowHTML(add.dataset.add, { label: 'altro', value: '' })); return; }
             const del = e.target.closest('[data-del]'); if (del) { del.closest('.ctf-row').remove(); return; }
+            const mp = e.target.closest('[data-map]'); if (mp) { open('maps'); ctlOf('maps').search?.(mp.dataset.map.replace(/\n/g, ', ')); return; }
             const a = e.target.closest('[data-cact]')?.dataset.cact; const c = list.find(x => x.id === sel);
             if (a === 'new') { try { const n = await api('POST', '/contacts', { first_name: '', last_name: '' }); list.push(n); sel = n.id; editing = true; draw(); $('#ctForm input[name=first_name]', body)?.focus(); } catch (err) { toast(err.message); } }
             if (a === 'edit') { editing = true; draw(); }
@@ -3098,6 +3102,533 @@
         });
     }
 
+    /* ---------- Meteo ---------- */
+    // Codici WMO di Open-Meteo: [descrizione, icona di giorno, icona di notte, sfondo]
+    function wxInfo(code) {
+        const T = [[[0], 'Sereno', '☀️', '🌙', 'clear'], [[1], 'Prevalentemente sereno', '🌤️', '🌙', 'clear'], [[2], 'Parzialmente nuvoloso', '⛅', '☁️', 'cloud'], [[3], 'Coperto', '☁️', '☁️', 'cloud'],
+            [[45, 48], 'Nebbia', '🌫️', '🌫️', 'fog'], [[51, 53, 55, 56, 57], 'Pioviggine', '🌦️', '🌧️', 'rain'], [[61, 63, 65, 66, 67], 'Pioggia', '🌧️', '🌧️', 'rain'],
+            [[71, 73, 75, 77], 'Neve', '🌨️', '🌨️', 'snow'], [[80, 81, 82], 'Rovesci', '🌦️', '🌧️', 'rain'], [[85, 86], 'Rovesci di neve', '🌨️', '🌨️', 'snow'], [[95, 96, 99], 'Temporale', '⛈️', '⛈️', 'storm']];
+        const r = T.find(x => x[0].includes(code)) || T[3];
+        return { label: r[1], day: r[2], night: r[3], bg: r[4] };
+    }
+    const wxIcon = (code, day = 1) => wxInfo(code)[day ? 'day' : 'night'];
+    const wxT = v => v == null ? '—' : Math.round(S.weatherUnit === 'f' ? v * 9 / 5 + 32 : v) + '°';
+    const wxCache = new Map();  // "lat,lon" -> {t, data}
+    async function wxFetch(c) {
+        const k = c.lat.toFixed(3) + ',' + c.lon.toFixed(3), hit = wxCache.get(k);
+        if (hit && Date.now() - hit.t < 10 * 60e3) return hit.data;
+        const data = await api('GET', `/geo/weather?lat=${c.lat}&lon=${c.lon}`);
+        wxCache.set(k, { t: Date.now(), data }); return data;
+    }
+    // L'ora locale della città: Open-Meteo restituisce gli orari già nel suo fuso
+    const wxLocalNow = d => new Date(Date.now() + (d.utc_offset_seconds + new Date().getTimezoneOffset() * 60) * 1000);
+    const wxCities = () => [...(store.get('wx.here', null) ? [{ ...store.get('wx.here'), here: true }] : []), ...(S.weatherCities || [])];
+    const windDir = deg => ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'][Math.round(deg / 45) % 8];
+    async function locateHere() {
+        const pos = await new Promise((ok, ko) => navigator.geolocation ? navigator.geolocation.getCurrentPosition(ok, ko, { timeout: 10000, maximumAge: 600e3 }) : ko(new Error('no')));
+        const lat = +pos.coords.latitude.toFixed(4), lon = +pos.coords.longitude.toFixed(4);
+        let name = 'Posizione attuale';
+        try { const r = await api('GET', `/geo/reverse?city=1&lat=${lat}&lon=${lon}`); name = r.name || name; } catch {}
+        return { name, lat, lon };
+    }
+
+    function weather(body, win) {
+        let sel = store.get('wx.sel', 0), results = null, q = '';
+        async function draw() {
+            const cities = wxCities();
+            if (sel >= cities.length) sel = 0;
+            body.innerHTML = `<div class="wx">
+                <aside class="wx-side"><div class="as-search"><input id="wxSearch" type="search" placeholder="Cerca una città" value="${esc(q)}" autocomplete="off"></div>
+                    <div class="wx-list">${results ? (results.length ? results.map((r, i) => `<button class="wx-res" data-add="${i}"><b>${esc(r.name)}</b><small>${esc([r.region, r.country].filter(Boolean).join(', '))}</small></button>`).join('') : '<p class="wx-none">Nessuna città trovata</p>')
+                        : cities.map((c, i) => `<button class="wx-card ${i === sel ? 'on' : ''}" data-city="${i}" data-wx-bg><div><b>${c.here ? '➤ ' : ''}${esc(c.here ? 'La mia posizione' : c.name)}</b><small data-wx-time>${c.here ? esc(c.name) : ''}</small><small data-wx-cond></small></div><div><span class="wx-card-t" data-wx-temp>—</span><small data-wx-hl></small></div></button>`).join('')
+                            + `${store.get('wx.here', null) ? '' : '<button class="wx-locate" data-wact="locate">➤ Usa la posizione attuale</button>'}`}</div></aside>
+                <div class="wx-main"><div class="wx-sky"></div><div class="wx-scroll"></div></div></div>`;
+            const s = $('#wxSearch', body); let tm;
+            s.oninput = () => { q = s.value; clearTimeout(tm); if (!q.trim()) { results = null; return draw().then(() => { const n = $('#wxSearch', body); n.focus(); }); }
+                tm = setTimeout(async () => { try { results = await api('GET', '/geo/cities?q=' + encodeURIComponent(q.trim())); } catch (e) { results = []; } const pos = s.selectionStart; await draw(); const n = $('#wxSearch', body); n.focus(); n.setSelectionRange(pos, pos); }, 350); };
+            s.onkeydown = e => { if (e.key === 'Escape') { q = ''; results = null; draw(); } };
+            if (results) return;
+            // Schede della barra laterale
+            body.querySelectorAll('.wx-card').forEach(async el => {
+                const c = cities[+el.dataset.city];
+                try { const d = await wxFetch(c), cur = d.current, now = wxLocalNow(d), inf = wxInfo(cur.weather_code);
+                    el.dataset.wxBg = inf.bg + (cur.is_day ? '' : ' night');
+                    if (!c.here) $('[data-wx-time]', el).textContent = now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+                    $('[data-wx-cond]', el).textContent = inf.label; $('[data-wx-temp]', el).textContent = wxT(cur.temperature_2m);
+                    $('[data-wx-hl]', el).textContent = `Max ${wxT(d.daily.temperature_2m_max[0])} Min ${wxT(d.daily.temperature_2m_min[0])}`;
+                } catch {}
+            });
+            const c = cities[sel], main = $('.wx-scroll', body);
+            if (!c) { main.innerHTML = `<div class="wx-empty"><div class="wx-big-ico">⛅</div><h2>Meteo</h2><p>Cerca una città nella barra laterale per aggiungerla,<br>oppure usa la tua posizione.</p><button class="btn primary" data-wact="locate">➤ Usa la posizione attuale</button></div>`; $('.wx', body).dataset.sky = 'clear'; return; }
+            main.innerHTML = '<p class="wx-loading">Caricamento…</p>';
+            let d; try { d = await wxFetch(c); } catch (e) { main.innerHTML = `<p class="wx-loading">${esc(e.message)}</p>`; return; }
+            if (!body.isConnected) return;
+            const cur = d.current, inf = wxInfo(cur.weather_code), now = wxLocalNow(d), hrs = d.hourly, dl = d.daily;
+            $('.wx', body).dataset.sky = inf.bg + (cur.is_day ? '' : '-night');
+            const start = hrs.time.findIndex(t => new Date(t) >= new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()));
+            const hours = hrs.time.slice(Math.max(0, start), Math.max(0, start) + 25).map((t, i) => { const j = Math.max(0, start) + i; return { t, temp: hrs.temperature_2m[j], code: hrs.weather_code[j], pp: hrs.precipitation_probability[j], day: hrs.is_day[j] }; });
+            // Alba e tramonto inseriti nella fascia oraria, come sul Mac
+            const sunEv = [];
+            dl.sunrise.slice(0, 2).forEach(s => sunEv.push({ t: s, sun: 'Alba', ico: '🌅' })); dl.sunset.slice(0, 2).forEach(s => sunEv.push({ t: s, sun: 'Tramonto', ico: '🌇' }));
+            const strip = [...hours.map(h => ({ ...h, sort: h.t })), ...sunEv.filter(e => hours.length && e.t > hours[0].t && e.t < hours.at(-1).t).map(e => ({ ...e, sort: e.t }))].sort((a, b) => a.sort.localeCompare(b.sort));
+            const lo = Math.min(...dl.temperature_2m_min), hi = Math.max(...dl.temperature_2m_max), hm = t => t.slice(11, 16);
+            const rainSoon = hours.slice(0, 6).find(h => h.pp >= 50);
+            const dayName = (t, i) => i === 0 ? 'Oggi' : new Date(t + 'T12:00').toLocaleDateString('it-IT', { weekday: 'short' }).replace('.', '');
+            const uvTxt = u => u < 3 ? 'Basso' : u < 6 ? 'Moderato' : u < 8 ? 'Alto' : u < 11 ? 'Molto alto' : 'Estremo';
+            main.innerHTML = `
+                <header class="wx-head"><h1>${esc(c.here ? 'La mia posizione' : c.name)}</h1>${c.here ? `<small>${esc(c.name)}</small>` : ''}
+                    <div class="wx-now">${wxT(cur.temperature_2m)}</div><p>${inf.label}</p><p>Max ${wxT(dl.temperature_2m_max[0])} &nbsp;Min ${wxT(dl.temperature_2m_min[0])}</p></header>
+                <section class="wx-box"><h5>${rainSoon ? `🌧️ Probabilità di pioggia del ${rainSoon.pp}% verso le ${hm(rainSoon.t)}.` : `${inf.label} per ora. Vento fino a ${Math.round(cur.wind_speed_10m)} km/h.`}</h5>
+                    <div class="wx-hours">${strip.map((h, i) => h.sun ? `<div class="wx-h sun"><small>${hm(h.t)}</small><span>${h.ico}</span><b>${h.sun}</b></div>`
+                        : `<div class="wx-h"><small>${i === 0 ? 'Ora' : hm(h.t).slice(0, 2)}</small><span>${wxIcon(h.code, h.day)}</span>${h.pp >= 20 ? `<em>${h.pp}%</em>` : ''}<b>${wxT(h.temp)}</b></div>`).join('')}</div></section>
+                <div class="wx-cols">
+                    <section class="wx-box wx-days"><h5>📅 Previsioni a 10 giorni</h5>${dl.time.map((t, i) => {
+                        const a = (dl.temperature_2m_min[i] - lo) / (hi - lo || 1) * 100, b = (dl.temperature_2m_max[i] - lo) / (hi - lo || 1) * 100;
+                        return `<div class="wx-day"><b>${dayName(t, i)}</b><span>${wxIcon(dl.weather_code[i])}${dl.precipitation_probability_max[i] >= 30 ? `<em>${dl.precipitation_probability_max[i]}%</em>` : ''}</span><small>${wxT(dl.temperature_2m_min[i])}</small>
+                            <i class="wx-range"><i style="left:${a}%;right:${100 - b}%"></i>${i === 0 ? `<u style="left:${(cur.temperature_2m - lo) / (hi - lo || 1) * 100}%"></u>` : ''}</i><small>${wxT(dl.temperature_2m_max[i])}</small></div>`; }).join('')}</section>
+                    <div class="wx-tiles">
+                        <section class="wx-box wx-tile"><h5>🌡️ Percepita</h5><b>${wxT(cur.apparent_temperature)}</b><p>${Math.abs(cur.apparent_temperature - cur.temperature_2m) < 2 ? 'Simile alla temperatura reale.' : cur.apparent_temperature < cur.temperature_2m ? 'Il vento la fa sembrare più fredda.' : 'L\'umidità la fa sembrare più calda.'}</p></section>
+                        <section class="wx-box wx-tile"><h5>☀️ Indice UV</h5><b>${Math.round(dl.uv_index_max[0])}</b><p>${uvTxt(dl.uv_index_max[0])}</p><i class="wx-uv"><u style="left:${Math.min(100, dl.uv_index_max[0] / 11 * 100)}%"></u></i></section>
+                        <section class="wx-box wx-tile"><h5>💨 Vento</h5><div class="wx-compass"><i style="transform:rotate(${cur.wind_direction_10m + 180}deg)"></i><b>${Math.round(cur.wind_speed_10m)}<small>km/h</small></b></div><p>Da ${windDir(cur.wind_direction_10m)}</p></section>
+                        <section class="wx-box wx-tile"><h5>💧 Umidità</h5><b>${cur.relative_humidity_2m}%</b><p>Precipitazioni: ${cur.precipitation} mm nell'ultima ora.</p></section>
+                        <section class="wx-box wx-tile"><h5>🌅 Alba e tramonto</h5><b>${hm(dl.sunrise[0])}</b><p>Tramonto: ${hm(dl.sunset[0])}</p></section>
+                        <section class="wx-box wx-tile"><h5>⏲️ Pressione</h5><b>${Math.round(cur.surface_pressure)}<small> hPa</small></b><p>Visibilità: ${cur.visibility >= 1000 ? Math.round(cur.visibility / 1000) + ' km' : Math.round(cur.visibility) + ' m'}</p></section>
+                    </div></div>
+                <p class="wx-credit">Dati meteo: Open-Meteo.com</p>`;
+        }
+        async function locate() {
+            try { const h = await locateHere(); store.set('wx.here', h); sel = 0; store.set('wx.sel', 0); draw(); }
+            catch { toast('Posizione non disponibile: consenti l\'accesso alla posizione nel browser.', { app: 'Meteo' }); }
+        }
+        function addCity(r) {
+            const list = S.weatherCities || [];
+            const at = list.findIndex(c => Math.abs(c.lat - r.lat) < .01 && Math.abs(c.lon - r.lon) < .01);
+            if (at < 0) setSetting('weatherCities', [...list, { name: r.name, region: r.region, country: r.country, lat: r.lat, lon: r.lon, tz: r.tz }]);
+            q = ''; results = null;
+            sel = wxCities().findIndex(c => !c.here && Math.abs(c.lat - r.lat) < .01 && Math.abs(c.lon - r.lon) < .01); store.set('wx.sel', sel); draw();
+        }
+        function remove(i) {
+            const c = wxCities()[i]; if (!c) return;
+            if (c.here) store.set('wx.here', null); else setSetting('weatherCities', (S.weatherCities || []).filter(x => x !== c && !(x.lat === c.lat && x.lon === c.lon)));
+            sel = 0; draw();
+        }
+        function move(i, dir) {
+            const off = store.get('wx.here', null) ? 1 : 0, list = [...(S.weatherCities || [])], a = i - off, b = a + dir;
+            if (a < 0 || b < 0 || b >= list.length) return;
+            [list[a], list[b]] = [list[b], list[a]]; setSetting('weatherCities', list); sel = b + off; draw();
+        }
+        body.addEventListener('click', e => {
+            const add = e.target.closest('[data-add]'); if (add) { api('GET', '/geo/cities?q=' + encodeURIComponent(q.trim())).then(r => addCity(r[+add.dataset.add])); return; }
+            const cc = e.target.closest('[data-city]'); if (cc) { sel = +cc.dataset.city; store.set('wx.sel', sel); return draw(); }
+            if (e.target.closest('[data-wact="locate"]')) locate();
+        });
+        const refresh = setInterval(() => { if (!body.isConnected) return clearInterval(refresh); if (!win.hidden) { wxCache.clear(); draw(); } }, 15 * 60e3);
+        draw();
+        return {
+            context: e => {
+                const cc = e.target.closest('[data-city]'); if (!cc) return null;
+                const i = +cc.dataset.city, c = wxCities()[i];
+                return [['Sposta su', !c.here && (() => move(i, -1))], ['Sposta giù', !c.here && (() => move(i, 1))], '-', ['Apri in Mappe', () => { open('maps'); ctlOf('maps').show?.({ name: c.name, lat: c.lat, lon: c.lon }); }], '-', ['Rimuovi', () => remove(i)]];
+            },
+            menus: () => ({
+                Vista: [[check(S.weatherUnit !== 'f', 'Celsius (°C)'), () => { setSetting('weatherUnit', 'c'); draw(); }], [check(S.weatherUnit === 'f', 'Fahrenheit (°F)'), () => { setSetting('weatherUnit', 'f'); draw(); }], '-',
+                    ['Aggiorna', () => { wxCache.clear(); draw(); }, '⌘R'], [check(S.weatherAlerts !== false, 'Avvisi di pioggia e temporali'), () => setSetting('weatherAlerts', S.weatherAlerts === false)]],
+                File: [['Usa la posizione attuale', locate], ['Rimuovi città', wxCities()[sel] && (() => remove(sel))], '-', ['Chiudi finestra', () => close('weather'), '⌘W']],
+            }),
+            prefs: () => sheet(win, { title: 'Impostazioni Meteo', ok: 'Salva', fields: [{ name: 'unit', type: 'select', label: 'Unità', value: S.weatherUnit || 'c', options: [['c', 'Celsius (°C)'], ['f', 'Fahrenheit (°F)']] }, { name: 'alerts', type: 'checkbox', label: 'Avvisa nel Centro notifiche se arrivano pioggia o temporali', value: S.weatherAlerts !== false }] })
+                .then(r => { if (r) { setSetting('weatherUnit', r.unit); setSetting('weatherAlerts', !!r.alerts); draw(); } }),
+        };
+    }
+    // Avvisi meteo: ogni 30 minuti controlla le prossime 3 ore nella prima città (o nella posizione attuale)
+    async function weatherWatch() {
+        if (S.weatherAlerts === false) return;
+        const c = wxCities()[0]; if (!c) return;
+        try {
+            const d = await wxFetch(c), now = wxLocalNow(d), h = d.hourly;
+            for (let i = 0; i < h.time.length; i++) {
+                const t = new Date(h.time[i]), diff = (t - now) / 3600e3;
+                if (diff < 0 || diff > 3) continue;
+                const storm = h.weather_code[i] >= 95, rain = h.weather_code[i] >= 51 && h.precipitation_probability[i] >= 60;
+                if (!storm && !rain) continue;
+                const key = c.name + h.time[i].slice(0, 13) + (storm ? 's' : 'r'), seen = store.get('wx.alerted', []);
+                if (seen.includes(key)) return;
+                store.set('wx.alerted', [key, ...seen].slice(0, 20));
+                toast(`${storm ? '⛈️ Temporale' : '🌧️ Pioggia'} previsto a ${c.here ? c.name : c.name} verso le ${h.time[i].slice(11, 16)} (${h.precipitation_probability[i]}%).`, { app: 'Meteo' });
+                return;
+            }
+        } catch {}
+    }
+    setTimeout(weatherWatch, 8000); setInterval(weatherWatch, 30 * 60e3);
+    async function ncWeather(box) {
+        const c = wxCities()[0];
+        if (!c) { box.innerHTML = '<strong>Meteo</strong><small>Aggiungi una città in Meteo</small>'; return; }
+        try { const d = await wxFetch(c), cur = d.current;
+            box.dataset.wxBg = wxInfo(cur.weather_code).bg + (cur.is_day ? '' : ' night');
+            box.innerHTML = `<strong>${esc(c.here ? c.name : c.name)}${c.here ? ' ➤' : ''}</strong><div class="ncw-t">${wxT(cur.temperature_2m)}<span>${wxIcon(cur.weather_code, cur.is_day)}</span></div><small>${wxInfo(cur.weather_code).label}</small><small>Max ${wxT(d.daily.temperature_2m_max[0])} Min ${wxT(d.daily.temperature_2m_min[0])}</small>`;
+        } catch { box.innerHTML = '<strong>Meteo</strong><small>Non disponibile</small>'; }
+    }
+
+    /* ---------- Mappe ---------- */
+    let leafletReady = null;
+    function loadLeaflet() {
+        if (window.L) return Promise.resolve();
+        return leafletReady ||= new Promise((ok, ko) => {
+            const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/vendor/leaflet/leaflet.css'; document.head.append(css);
+            const s = document.createElement('script'); s.src = '/vendor/leaflet/leaflet.js'; s.onload = ok; s.onerror = () => { leafletReady = null; ko(new Error('Mappa non caricata')); }; document.head.append(s);
+        });
+    }
+    const fmtKm = m => m < 1000 ? Math.round(m / 10) * 10 + ' m' : (m / 1000).toLocaleString('it-IT', { maximumFractionDigits: m < 10000 ? 1 : 0 }) + ' km';
+    const fmtDurRoute = s => { const m = Math.round(s / 60); return m < 60 ? m + ' min' : `${Math.floor(m / 60)} h ${m % 60 ? (m % 60) + ' min' : ''}`.trim(); };
+    function stepText(s) {
+        const dir = { left: 'a sinistra', right: 'a destra', 'slight left': 'leggermente a sinistra', 'slight right': 'leggermente a destra', 'sharp left': 'decisamente a sinistra', 'sharp right': 'decisamente a destra', straight: 'dritto', uturn: 'con un\'inversione' }[s.modifier] || '';
+        const on = s.name ? ` su ${s.name}` : '';
+        switch (s.type) {
+            case 'depart': return 'Parti' + on;
+            case 'arrive': return 'Sei arrivato a destinazione';
+            case 'roundabout': case 'rotary': case 'roundabout turn': return `Alla rotonda prendi la ${s.exit || 1}ª uscita${on}`;
+            case 'exit roundabout': case 'exit rotary': return 'Esci dalla rotonda' + on;
+            case 'merge': return 'Immettiti' + on;
+            case 'on ramp': return 'Prendi la rampa' + on;
+            case 'off ramp': return 'Prendi l\'uscita' + on;
+            case 'fork': return `Al bivio tieni la ${s.modifier?.includes('left') ? 'sinistra' : 'destra'}${on}`;
+            case 'end of road': return `In fondo alla strada svolta ${dir}${on}`;
+            case 'continue': case 'new name': return (s.modifier === 'straight' || !dir ? 'Prosegui' : 'Prosegui ' + dir) + on;
+            default: return (s.modifier === 'straight' ? 'Prosegui dritto' : s.modifier === 'uturn' ? 'Fai inversione' : 'Svolta ' + dir) + on;
+        }
+    }
+    const stepIco = s => s.type === 'arrive' ? '🏁' : s.type === 'depart' ? '●' : /roundabout|rotary/.test(s.type) ? '⟳' : s.modifier?.includes('left') ? '↰' : s.modifier?.includes('right') ? '↱' : s.modifier === 'uturn' ? '↶' : '↑';
+
+    function maps(body, win) {
+        let map, layer, marker = null, routeLine = null, hereMarker = null, results = null, here = store.get('wx.here', null);
+        let dir = null;  // indicazioni: {from, to, mode, route}
+        const places = () => S.mapPlaces || [];
+        const recent = () => store.get('maps.recent', []);
+        body.innerHTML = `<div class="mp">
+            <aside class="mp-side"><div class="as-search"><input id="mpSearch" type="search" placeholder="Cerca in Mappe" autocomplete="off"></div><div class="mp-panel"></div></aside>
+            <div class="mp-map"><div class="mp-canvas"></div>
+                <div class="mp-tools"><div class="seg"><button data-layer="street">Mappa</button><button data-layer="satellite">Satellite</button></div><button class="mp-btn" data-mact="dir" title="Indicazioni">↱ Indicazioni</button></div>
+                <div class="mp-zoom"><button data-mact="locate" title="Posizione attuale">➤</button><button data-mact="zin" title="Ingrandisci">＋</button><button data-mact="zout" title="Riduci">－</button></div></div></div>`;
+        const panel = $('.mp-panel', body), search = $('#mpSearch', body);
+        const pin = (name, kind) => L.divIcon({ className: 'mp-pin', html: `<span class="mp-pin-${kind || 'red'}"><b>${kind === 'home' ? '⌂' : kind === 'work' ? '▣' : kind === 'fav' ? '★' : '●'}</b></span>`, iconSize: [30, 38], iconAnchor: [15, 36], popupAnchor: [0, -34] });
+        function setLayer(l) {
+            if (layer) map.removeLayer(layer);
+            layer = L.tileLayer(`/geo/tile/${l}/{z}/{x}/{y}`, { maxZoom: 19, attribution: l === 'street' ? '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' : 'Immagini © Esri, Maxar, Earthstar Geographics' }).addTo(map);
+            body.querySelectorAll('[data-layer]').forEach(b => b.classList.toggle('on', b.dataset.layer === l));
+            if (S.mapLayer !== l) setSetting('mapLayer', l);
+        }
+        function popupHTML(p) {
+            const saved = places().find(x => Math.abs(x.lat - p.lat) < 1e-4 && Math.abs(x.lon - p.lon) < 1e-4);
+            return `<div class="mp-pop"><b>${esc(p.name)}</b>${p.address ? `<small>${esc(p.address)}</small>` : ''}<div><button class="btn primary" data-pop="dir">Indicazioni</button><button class="btn" data-pop="${saved ? 'unsave' : 'save'}">${saved ? '★ Salvato' : '☆ Salva'}</button></div></div>`;
+        }
+        function show(p, zoom = 16) {
+            if (!map) return void (pending = p);
+            if (marker) map.removeLayer(marker);
+            const saved = places().find(x => Math.abs(x.lat - p.lat) < 1e-4 && Math.abs(x.lon - p.lon) < 1e-4);
+            marker = L.marker([p.lat, p.lon], { icon: pin(p.name, saved?.kind) }).addTo(map).bindPopup(popupHTML(p), { closeButton: false, minWidth: 220 });
+            marker.place = p;
+            map.flyTo([p.lat, p.lon], Math.max(zoom, map.getZoom() > zoom ? map.getZoom() : zoom), { duration: .8 });
+            setTimeout(() => marker?.openPopup(), 850);
+            const r = recent().filter(x => x.name !== p.name || x.lat !== p.lat); store.set('maps.recent', [{ name: p.name, address: p.address, lat: p.lat, lon: p.lon }, ...r].slice(0, 8));
+        }
+        let pending = null;
+        function drawPanel() {
+            if (dir) return drawDir();
+            if (results) {
+                panel.innerHTML = results.length ? results.map((r, i) => `<button class="mp-item" data-res="${i}"><span class="mp-ico">📍</span><div><b>${esc(r.name)}</b><small>${esc(r.address)}</small></div></button>`).join('') : '<p class="wx-none">Nessun risultato</p>';
+                return;
+            }
+            const ps = places(), home = ps.find(p => p.kind === 'home'), work = ps.find(p => p.kind === 'work');
+            panel.innerHTML = `<h4>Preferiti</h4><div class="mp-favs">
+                    <button data-fav="home"><span class="mp-pin-home">⌂</span><small>${home ? 'Casa' : 'Aggiungi Casa'}</small></button>
+                    <button data-fav="work"><span class="mp-pin-work">▣</span><small>${work ? 'Lavoro' : 'Aggiungi Lavoro'}</small></button></div>
+                ${ps.filter(p => p.kind === 'fav').length ? '<h4>Luoghi salvati</h4>' + ps.map((p, i) => p.kind === 'fav' ? `<button class="mp-item" data-place="${i}"><span class="mp-ico fav">★</span><div><b>${esc(p.name)}</b><small>${esc(p.address || '')}</small></div></button>` : '').join('') : ''}
+                ${recent().length ? '<h4>Recenti</h4>' + recent().map((p, i) => `<button class="mp-item" data-recent="${i}"><span class="mp-ico">🕘</span><div><b>${esc(p.name)}</b><small>${esc(p.address || '')}</small></div></button>`).join('') : ''}
+                <p class="mp-hint">Tasto destro sulla mappa per le indicazioni fino a quel punto o per salvarlo.</p>`;
+        }
+        function drawDir() {
+            const r = dir.route;
+            panel.innerHTML = `<div class="mp-dir"><div class="mp-dir-head"><button class="as-back" data-mact="dir-close">‹ Indietro</button></div>
+                <div class="mp-dir-pts"><label><i class="a"></i><input data-pt="from" placeholder="Partenza" value="${esc(dir.from?.name || '')}" autocomplete="off"></label><button data-mact="swap" title="Inverti">⇅</button>
+                    <label><i class="b"></i><input data-pt="to" placeholder="Destinazione" value="${esc(dir.to?.name || '')}" autocomplete="off"></label></div>
+                <div class="seg mp-modes">${[['car', '🚗 Auto'], ['foot', '🚶 A piedi'], ['bike', '🚲 Bici']].map(([k, l]) => `<button data-mode="${k}" class="${dir.mode === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+                <div class="mp-dir-sugg"></div>
+                ${r ? `<div class="mp-sum"><b>${fmtDurRoute(r.duration)}</b><small>${fmtKm(r.distance)}${dir.mode === 'car' ? ' · senza traffico in tempo reale' : ''}</small></div>
+                    <ol class="mp-steps">${r.steps.map((s, i) => `<li data-step="${i}"><span>${stepIco(s)}</span><div>${esc(stepText(s))}${s.distance > 0 && s.type !== 'arrive' ? `<small>${fmtKm(s.distance)}</small>` : ''}</div></li>`).join('')}</ol>`
+                    : dir.loading ? '<p class="wx-loading">Calcolo del percorso…</p>' : dir.error ? `<p class="wx-none">${esc(dir.error)}</p>` : '<p class="mp-hint">Scegli partenza e destinazione.</p>'}</div>`;
+            panel.querySelectorAll('[data-pt]').forEach(inp => {
+                let tm;
+                inp.oninput = () => { clearTimeout(tm); tm = setTimeout(async () => {
+                    const q = inp.value.trim(), box = $('.mp-dir-sugg', panel); if (!q) return box.innerHTML = '';
+                    let res = []; try { const c = map.getCenter(); res = await api('GET', `/geo/search?q=${encodeURIComponent(q)}&lat=${c.lat}&lon=${c.lng}`); } catch {}
+                    const opts = [...(here && 'posizione attuale'.includes(q.toLowerCase()) ? [{ ...here, name: 'Posizione attuale', address: here.name }] : []), ...places().filter(p => p.name.toLowerCase().includes(q.toLowerCase())), ...res];
+                    box.innerHTML = opts.map((r, i) => `<button class="mp-item" data-sugg="${i}"><span class="mp-ico">📍</span><div><b>${esc(r.name)}</b><small>${esc(r.address || '')}</small></div></button>`).join('');
+                    box.onclick = e => { const b = e.target.closest('[data-sugg]'); if (!b) return; dir[inp.dataset.pt] = opts[+b.dataset.sugg]; calcRoute(); };
+                }, 400); };
+            });
+        }
+        async function calcRoute() {
+            if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+            dir.route = null; dir.error = null;
+            if (!dir.from || !dir.to) return drawDir();
+            dir.loading = true; drawDir();
+            try {
+                dir.route = await api('POST', '/geo/route', { mode: dir.mode, from: [dir.from.lat, dir.from.lon], to: [dir.to.lat, dir.to.lon] });
+                routeLine = L.layerGroup([L.polyline(dir.route.line, { color: '#fff', weight: 9, opacity: .9 }), L.polyline(dir.route.line, { color: dir.mode === 'car' ? '#0a84ff' : dir.mode === 'foot' ? '#30b0c7' : '#34c759', weight: 6, dashArray: dir.mode === 'foot' ? '1 10' : null, lineCap: 'round' }),
+                    L.circleMarker([dir.from.lat, dir.from.lon], { radius: 7, color: '#fff', weight: 3, fillColor: '#34c759', fillOpacity: 1 }),
+                    L.marker([dir.to.lat, dir.to.lon], { icon: pin(dir.to.name) })]).addTo(map);
+                if (marker) { map.removeLayer(marker); marker = null; }
+                map.fitBounds(L.latLngBounds(dir.route.line), { padding: [40, 40] });
+            } catch (e) { dir.error = e.message; }
+            dir.loading = false; drawDir();
+        }
+        function directions(to, from) {
+            dir = { from: from || (here ? { ...here, name: 'Posizione attuale' } : null), to: to || null, mode: store.get('maps.mode', 'car') };
+            map?.closePopup(); calcRoute();
+            setTimeout(() => $(`[data-pt="${dir.from ? 'to' : 'from'}"]`, panel)?.focus(), 50);
+        }
+        function savePlace(p, kind = 'fav') {
+            let list = places().filter(x => kind === 'fav' ? !(Math.abs(x.lat - p.lat) < 1e-4 && Math.abs(x.lon - p.lon) < 1e-4) : x.kind !== kind);
+            list = [...list, { name: kind === 'home' ? 'Casa' : kind === 'work' ? 'Lavoro' : p.name, address: p.address || null, lat: +(+p.lat).toFixed(6), lon: +(+p.lon).toFixed(6), kind }];
+            setSetting('mapPlaces', list); drawPanel(); if (marker?.place) marker.setPopupContent(popupHTML(marker.place));
+            toast(kind === 'home' ? 'Casa impostata' : kind === 'work' ? 'Lavoro impostato' : `«${p.name}» salvato`, { app: 'Mappe', silent: true });
+        }
+        function unsavePlace(p) { setSetting('mapPlaces', places().filter(x => !(Math.abs(x.lat - p.lat) < 1e-4 && Math.abs(x.lon - p.lon) < 1e-4))); drawPanel(); if (marker?.place) marker.setPopupContent(popupHTML(marker.place)); }
+        async function doSearch(q) {
+            q = q.trim(); if (!q) { results = null; return drawPanel(); }
+            panel.innerHTML = '<p class="wx-loading">Ricerca…</p>';
+            try { const c = map ? map.getCenter() : null; results = await api('GET', `/geo/search?q=${encodeURIComponent(q)}${c ? `&lat=${c.lat}&lon=${c.lng}` : ''}`); } catch (e) { results = []; toast(e.message, { app: 'Mappe' }); }
+            dir = null; drawPanel();
+            if (results.length === 1) show(results[0]);
+            else if (results.length && map) { map.fitBounds(L.latLngBounds(results.map(r => [r.lat, r.lon])), { padding: [50, 50], maxZoom: 15 }); results.forEach(r => {}); }
+        }
+        async function locate() {
+            try { here = await locateHere(); store.set('wx.here', here); } catch { return toast('Posizione non disponibile: consenti l\'accesso alla posizione nel browser.', { app: 'Mappe' }); }
+            if (hereMarker) map.removeLayer(hereMarker);
+            hereMarker = L.circleMarker([here.lat, here.lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#0a84ff', fillOpacity: 1 }).addTo(map).bindTooltip('Posizione attuale');
+            map.flyTo([here.lat, here.lon], 15, { duration: .8 });
+        }
+        search.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(search.value); if (e.key === 'Escape') { search.value = ''; results = null; drawPanel(); } });
+        search.addEventListener('input', () => { if (!search.value) { results = null; drawPanel(); } });
+        body.addEventListener('click', e => {
+            const t = e.target;
+            const res = t.closest('[data-res]'); if (res) return show(results[+res.dataset.res]);
+            const rec = t.closest('[data-recent]'); if (rec) return show(recent()[+rec.dataset.recent]);
+            const pl = t.closest('[data-place]'); if (pl) return show(places()[+pl.dataset.place]);
+            const fv = t.closest('[data-fav]'); if (fv) { const p = places().find(x => x.kind === fv.dataset.fav); if (p) return show(p); search.focus(); return toast(`Cerca un indirizzo, poi tasto destro sul punto › «Imposta come ${fv.dataset.fav === 'home' ? 'Casa' : 'Lavoro'}».`, { app: 'Mappe', silent: true }); }
+            const ly = t.closest('[data-layer]'); if (ly) return setLayer(ly.dataset.layer);
+            const md = t.closest('[data-mode]'); if (md) { dir.mode = md.dataset.mode; store.set('maps.mode', dir.mode); return calcRoute(); }
+            const st = t.closest('[data-step]'); if (st && dir?.route) { const s = dir.route.steps[+st.dataset.step]; map.flyTo(s.at, 17, { duration: .6 }); return; }
+            const pop = t.closest('[data-pop]')?.dataset.pop;
+            if (pop && marker?.place) { if (pop === 'dir') directions(marker.place); if (pop === 'save') savePlace(marker.place); if (pop === 'unsave') unsavePlace(marker.place); return; }
+            const a = t.closest('[data-mact]')?.dataset.mact;
+            if (a === 'zin') map.zoomIn(); if (a === 'zout') map.zoomOut(); if (a === 'locate') locate();
+            if (a === 'dir') directions(marker?.place);
+            if (a === 'dir-close') { dir = null; if (routeLine) { map.removeLayer(routeLine); routeLine = null; } drawPanel(); }
+            if (a === 'swap' && dir) { [dir.from, dir.to] = [dir.to, dir.from]; calcRoute(); }
+        });
+        drawPanel();
+        loadLeaflet().then(() => {
+            if (!body.isConnected) return;
+            const last = store.get('maps.view', null);
+            map = L.map($('.mp-canvas', body), { zoomControl: false, worldCopyJump: true, attributionControl: true }).setView(last ? [last.lat, last.lon] : here ? [here.lat, here.lon] : [42.5, 12.5], last?.z ?? (here ? 13 : 6));
+            map.attributionControl.setPrefix('');
+            setLayer(S.mapLayer || 'street');
+            map.on('moveend', () => { const c = map.getCenter(); store.set('maps.view', { lat: +c.lat.toFixed(5), lon: +c.lng.toFixed(5), z: map.getZoom() }); });
+            map.on('contextmenu', async ev => {
+                const p = { name: 'Punto selezionato', lat: +ev.latlng.lat.toFixed(6), lon: +ev.latlng.lng.toFixed(6) };
+                const named = async () => { try { const r = await api('GET', `/geo/reverse?lat=${p.lat}&lon=${p.lon}`); return { ...p, name: r.name || p.name, address: r.address }; } catch { return p; } };
+                contextMenu(ev.originalEvent.clientX, ev.originalEvent.clientY, [['Cosa c\'è qui?', async () => show(await named(), map.getZoom())], ['Indicazioni fino a qui', async () => directions(await named())], ['Indicazioni da qui', async () => directions(dir?.to || null, await named())], '-',
+                    ['Salva questo luogo', async () => savePlace(await named())], ['Imposta come Casa', async () => savePlace(await named(), 'home')], ['Imposta come Lavoro', async () => savePlace(await named(), 'work')]]);
+            });
+            new ResizeObserver(() => map.invalidateSize()).observe($('.mp-canvas', body));
+            if (here) hereMarker = L.circleMarker([here.lat, here.lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#0a84ff', fillOpacity: 1 }).addTo(map).bindTooltip('Posizione attuale');
+            if (pending) { show(pending); pending = null; }
+        }).catch(e => { $('.mp-canvas', body).innerHTML = `<p class="wx-loading">${esc(e.message)}</p>`; });
+        return {
+            show: p => show(p),
+            search: q => { search.value = q; doSearch(q); },
+            context: e => {
+                const pl = e.target.closest('[data-place]'), rec = e.target.closest('[data-recent]');
+                if (pl) { const p = places()[+pl.dataset.place]; return [['Indicazioni', () => directions(p)], ['Rimuovi dai preferiti', () => unsavePlace(p)]]; }
+                if (rec) return [['Cancella recenti', () => { store.set('maps.recent', []); drawPanel(); }]];
+                return null;
+            },
+            menus: () => ({
+                Vista: [[check((S.mapLayer || 'street') === 'street', 'Mappa'), () => setLayer('street')], [check(S.mapLayer === 'satellite', 'Satellite'), () => setLayer('satellite')], '-',
+                    ['Ingrandisci', map && (() => map.zoomIn()), '⌘+'], ['Riduci', map && (() => map.zoomOut()), '⌘−'], ['Posizione attuale', map && locate]],
+                Vai: [['Indicazioni', map && (() => directions(marker?.place))], ['Casa', places().find(p => p.kind === 'home') && (() => show(places().find(p => p.kind === 'home')))], ['Lavoro', places().find(p => p.kind === 'work') && (() => show(places().find(p => p.kind === 'work')))], '-', ['Cancella recenti', () => { store.set('maps.recent', []); drawPanel(); }]],
+            }),
+        };
+    }
+
+    /* ---------- Orologio: ora del mondo, sveglie, cronometro, timer ---------- */
+    // Cronometro e timer continuano anche a finestra chiusa, come sul Mac
+    const clk = { sw: { start: 0, acc: 0, laps: [], running: false }, timers: [], ringing: null, firedKey: '', snoozes: [] };
+    const two = n => String(n).padStart(2, '0');
+    const fmtSW = ms => `${two(Math.floor(ms / 60000))}:${two(Math.floor(ms / 1000) % 60)},${two(Math.floor(ms / 10) % 100)}`;
+    const fmtLeft = ms => { const s = Math.max(0, Math.ceil(ms / 1000)), h = Math.floor(s / 3600); return (h ? h + ':' + two(Math.floor(s / 60) % 60) : Math.floor(s / 60)) + ':' + two(s % 60); };
+    const swNow = () => clk.sw.acc + (clk.sw.running ? performance.now() - clk.sw.start : 0);
+    const ALARM_SOUNDS = {
+        radar: () => [0, .18, .36, .54].forEach(t => tone(1320, t, .12, 'square', .5)),
+        campane: () => [784, 988, 1175, 1568].forEach((f, i) => tone(f, i * .22, 1.2, 'sine', .8)),
+        beacon: () => { tone(880, 0, .5, 'triangle', .8); tone(1320, .25, .6, 'triangle', .6); },
+        cristalli: () => [2093, 2637, 3136, 2637].forEach((f, i) => tone(f, i * .12, .5, 'sine', .45)),
+    };
+    function ring(sound) { try { audioCtx = audioCtx || new AudioContext(); audioCtx.resume?.(); (ALARM_SOUNDS[sound] || ALARM_SOUNDS.radar)(); } catch {} }
+    function startRinging(title, msg, sound, snooze) {
+        stopRinging();
+        let n = 0; ring(sound);
+        const loop = setInterval(() => { if (++n > 40) return stopRinging(); ring(sound); }, 1500);
+        clk.ringing = { loop };
+        toast(msg, { app: 'Orologio', force: true, silent: true, actions: [{ label: 'Interrompi', run: stopRinging }, ...(snooze ? [{ label: 'Posticipa', run: () => { stopRinging(); clk.snoozes.push({ at: Date.now() + 9 * 60e3, title, msg, sound }); } }] : [])] });
+    }
+    function stopRinging() { if (clk.ringing) { clearInterval(clk.ringing.loop); clk.ringing = null; } }
+    function clockTick() {
+        const now = new Date(), key = now.toDateString() + now.getHours() + ':' + now.getMinutes();
+        // Sveglie
+        if (clk.firedKey !== key) {
+            const hm = two(now.getHours()) + ':' + two(now.getMinutes());
+            const due = (S.alarms || []).filter(a => a.on && a.time === hm && (!a.days?.length || a.days.includes(now.getDay())));
+            if (due.length) {
+                clk.firedKey = key;
+                const a = due[0];
+                startRinging(a.label || 'Sveglia', `⏰ ${a.label || 'Sveglia'} — ${a.time}`, a.sound, a.snooze !== false);
+                const once = due.filter(x => !x.days?.length).map(x => x.id);
+                if (once.length) setSetting('alarms', S.alarms.map(x => once.includes(x.id) ? { ...x, on: false } : x));
+            }
+        }
+        clk.snoozes = clk.snoozes.filter(s => { if (s.at > Date.now()) return true; startRinging(s.title, s.msg, s.sound, true); return false; });
+        // Timer
+        clk.timers.forEach(t => { if (t.running && t.end <= Date.now()) { t.running = false; t.done = true; t.left = 0;
+            startRinging(t.label, `⏱ ${t.label || 'Timer'} terminato`, t.sound || 'radar', false); } });
+        drawTimerMini();
+    }
+    setInterval(clockTick, 1000);
+    function drawTimerMini() {
+        const run = clk.timers.filter(t => t.running).sort((a, b) => a.end - b.end)[0];
+        let btn = $('#timerMini');
+        if (!btn && run) { btn = document.createElement('button'); btn.id = 'timerMini'; btn.className = 'menu-icon timer-mini'; btn.title = 'Timer'; $('#spotlightBtn').before(btn); btn.onclick = e => { e.stopPropagation(); open('clock'); ctlOf('clock').tab?.('timer'); }; }
+        if (!btn) return;
+        btn.hidden = !run;
+        if (run) btn.textContent = '⏱ ' + fmtLeft(run.end - Date.now());
+    }
+    function clockFace(tz, size = 120) {
+        const ticks = [...Array(12).keys()].map(i => `<line x1="50" y1="6" x2="50" y2="${i % 3 ? 10 : 13}" transform="rotate(${i * 30} 50 50)"/>`).join('');
+        const nums = [12, 3, 6, 9].map((n, i) => { const a = i * Math.PI / 2; return `<text x="${50 + Math.sin(a) * 30}" y="${50 - Math.cos(a) * 30 + 3.5}">${n}</text>`; }).join('');
+        return `<svg class="clk-face" viewBox="0 0 100 100" width="${size}" height="${size}" data-tz="${esc(tz)}"><circle cx="50" cy="50" r="48"/><g class="clk-ticks">${ticks}</g><g class="clk-nums">${nums}</g>
+            <line class="h" x1="50" y1="50" x2="50" y2="27"/><line class="m" x1="50" y1="50" x2="50" y2="14"/><line class="s" x1="50" y1="58" x2="50" y2="10"/><circle class="c" cx="50" cy="50" r="2.5"/></svg>`;
+    }
+    const tzParts = tz => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date()).map(x => [x.type, x.value])); return { y: +p.year, mo: +p.month, d: +p.day, h: +p.hour % 24, m: +p.minute, s: +p.second }; };
+    const tzOffsetH = tz => { const p = tzParts(tz), l = new Date(); return Math.round((Date.UTC(p.y, p.mo - 1, p.d, p.h, p.m) - Date.UTC(l.getFullYear(), l.getMonth(), l.getDate(), l.getHours(), l.getMinutes())) / 6e4) / 60; };
+
+    function clock(body, win) {
+        let tab = store.get('clock.tab', 'world'), results = null, raf = 0;
+        const LOCAL = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const cities = () => S.clockCities?.length ? S.clockCities : [{ name: LOCAL.split('/').pop().replace(/_/g, ' '), tz: LOCAL }];
+        function draw() {
+            cancelAnimationFrame(raf);
+            body.innerHTML = `<div class="clk"><nav class="seg clk-tabs">${[['world', 'Ora del mondo'], ['alarm', 'Sveglie'], ['sw', 'Cronometro'], ['timer', 'Timer']].map(([k, l]) => `<button data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</nav><div class="clk-body"></div></div>`;
+            const b = $('.clk-body', body);
+            if (tab === 'world') {
+                b.innerHTML = `<div class="clk-world">${cities().map((c, i) => { const off = tzOffsetH(c.tz), p = tzParts(c.tz), l = new Date(), dd = Date.UTC(p.y, p.mo - 1, p.d) - Date.UTC(l.getFullYear(), l.getMonth(), l.getDate());
+                        return `<div class="clk-city" data-ci="${i}">${clockFace(c.tz)}<b>${esc(c.name)}</b><small>${dd > 0 ? 'Domani' : dd < 0 ? 'Ieri' : 'Oggi'}, ${off === 0 ? 'stessa ora' : (off > 0 ? '+' : '') + String(off).replace('.', ',') + ' h'}</small><span class="clk-dig" data-dig="${esc(c.tz)}"></span>${S.clockCities?.length ? `<button class="clk-x" data-rmcity="${i}" title="Rimuovi">×</button>` : ''}</div>`; }).join('')}
+                    <div class="clk-city clk-add"><div class="as-search"><input id="clkSearch" type="search" placeholder="＋ Aggiungi città" autocomplete="off"></div><div class="clk-res">${results ? results.filter(r => r.tz).map((r, i) => `<button data-addcity="${i}"><b>${esc(r.name)}</b><small>${esc(r.country || '')}</small></button>`).join('') || '<small>Nessuna città</small>' : ''}</div></div></div>`;
+                const s = $('#clkSearch', b); let tm;
+                s.oninput = () => { clearTimeout(tm); tm = setTimeout(async () => { const q = s.value.trim(); results = q ? await api('GET', '/geo/cities?q=' + encodeURIComponent(q)).catch(() => []) : null; const box = $('.clk-res', b);
+                    box.innerHTML = results ? results.filter(r => r.tz).map((r, i) => `<button data-addcity="${i}"><b>${esc(r.name)}</b><small>${esc([r.region, r.country].filter(Boolean).join(', '))}</small></button>`).join('') || '<small>Nessuna città</small>' : ''; }, 350); };
+                const hands = () => { b.querySelectorAll('.clk-face').forEach(svg => { const p = tzParts(svg.dataset.tz), ms = new Date().getMilliseconds();
+                        svg.querySelector('.h').setAttribute('transform', `rotate(${(p.h % 12) * 30 + p.m / 2} 50 50)`); svg.querySelector('.m').setAttribute('transform', `rotate(${p.m * 6 + p.s / 10} 50 50)`);
+                        svg.querySelector('.s').setAttribute('transform', `rotate(${(p.s + ms / 1000) * 6} 50 50)`); svg.classList.toggle('night', p.h < 6 || p.h >= 19); });
+                    b.querySelectorAll('[data-dig]').forEach(el => { const p = tzParts(el.dataset.dig); el.textContent = two(p.h) + ':' + two(p.m); });
+                    if (b.isConnected && tab === 'world') raf = requestAnimationFrame(hands); };
+                hands();
+            }
+            if (tab === 'alarm') {
+                const al = [...(S.alarms || [])].sort((x, y) => x.time.localeCompare(y.time)), DN = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
+                const days = a => !a.days?.length ? 'Una volta' : a.days.length === 7 ? 'Ogni giorno' : [1, 2, 3, 4, 5].every(d => a.days.includes(d)) && a.days.length === 5 ? 'Giorni feriali' : a.days.length === 2 && a.days.includes(0) && a.days.includes(6) ? 'Fine settimana' : [1, 2, 3, 4, 5, 6, 0].filter(d => a.days.includes(d)).map(d => DN[d]).join(' ');
+                b.innerHTML = `<div class="clk-alarms"><div class="clk-al-head"><h2>Sveglie</h2><button class="btn primary" data-cact="add-alarm">＋ Nuova sveglia</button></div>
+                    ${al.length ? al.map(a => `<div class="clk-al ${a.on ? '' : 'off'}" data-al="${esc(a.id)}"><div><b>${a.time}</b><small>${esc(a.label || 'Sveglia')}, ${days(a)}</small></div><label class="sw"><input type="checkbox" data-al-on ${a.on ? 'checked' : ''}><i></i></label></div>`).join('')
+                        : '<p class="rm-empty">Nessuna sveglia.<br>Le sveglie suonano quando MarX è aperto in una scheda del browser.</p>'}</div>`;
+            }
+            if (tab === 'sw') {
+                const laps = clk.sw.laps, cur = swNow(), lapTimes = laps.map((t, i) => t - (laps[i - 1] || 0)), mx = Math.max(...lapTimes), mn = Math.min(...lapTimes);
+                b.innerHTML = `<div class="clk-sw"><div class="clk-sw-dig">${fmtSW(cur)}</div>
+                    <div class="clk-sw-btns"><button class="clk-round" data-cact="${clk.sw.running ? 'lap' : 'reset'}" ${!clk.sw.running && !cur ? 'disabled' : ''}>${clk.sw.running || !cur ? 'Giro' : 'Azzera'}</button>
+                        <button class="clk-round ${clk.sw.running ? 'stop' : 'go'}" data-cact="${clk.sw.running ? 'stop' : 'start'}">${clk.sw.running ? 'Ferma' : 'Avvia'}</button></div>
+                    <ol class="clk-laps">${cur || laps.length ? `<li class="live"><span>Giro ${laps.length + 1}</span><span data-live>${fmtSW(cur - (laps.at(-1) || 0))}</span></li>` : ''}
+                        ${lapTimes.map((t, i) => [i, t]).reverse().map(([i, t]) => `<li class="${lapTimes.length > 1 && t === mn ? 'best' : lapTimes.length > 1 && t === mx ? 'worst' : ''}"><span>Giro ${i + 1}</span><span>${fmtSW(t)}</span></li>`).join('')}</ol></div>`;
+                const tick = () => { if (!b.isConnected || tab !== 'sw') return; const v = swNow(); const d = $('.clk-sw-dig', b); if (d) d.textContent = fmtSW(v); const l = $('[data-live]', b); if (l) l.textContent = fmtSW(v - (clk.sw.laps.at(-1) || 0)); if (clk.sw.running) raf = requestAnimationFrame(tick); };
+                tick();
+            }
+            if (tab === 'timer') {
+                const R = 44, C = 2 * Math.PI * R;
+                b.innerHTML = `<div class="clk-timer"><div class="clk-tm-new"><div class="clk-tm-in"><label><input type="number" min="0" max="23" value="0" data-tin="h"><small>ore</small></label><label><input type="number" min="0" max="59" value="5" data-tin="m"><small>min</small></label><label><input type="number" min="0" max="59" value="0" data-tin="s"><small>sec</small></label></div>
+                        <input class="clk-tm-label" data-tin="label" placeholder="Etichetta (facoltativa)" maxlength="40"><button class="btn primary" data-cact="tstart">Avvia</button></div>
+                    <div class="clk-presets">${[1, 3, 5, 10, 15, 30, 60].map(m => `<button data-preset="${m}">${m < 60 ? m + ' min' : '1 h'}</button>`).join('')}</div>
+                    <div class="clk-tms">${clk.timers.map((t, i) => { const left = t.running ? t.end - Date.now() : t.left, frac = Math.max(0, left / t.total);
+                        return `<div class="clk-tm ${t.done ? 'done' : ''}" data-ti="${i}"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="${R}" class="bg"/><circle cx="50" cy="50" r="${R}" class="fg" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - frac)}" transform="rotate(-90 50 50)"/></svg>
+                            <div class="clk-tm-txt"><b data-left>${t.done ? 'Fine' : fmtLeft(left)}</b><small>${esc(t.label || fmtLeft(t.total))}</small></div>
+                            <div class="clk-tm-btns"><button class="clk-round sm" data-cact="tdel" title="Annulla">✕</button><button class="clk-round sm ${t.running ? 'pause' : 'go'}" data-cact="${t.done ? 'trestart' : t.running ? 'tpause' : 'tresume'}">${t.done ? '↻' : t.running ? '⏸' : '▶'}</button></div></div>`; }).join('')}</div></div>`;
+                const tick = () => { if (!b.isConnected || tab !== 'timer') return;
+                    if ([...b.querySelectorAll('.clk-tm')].some(el => clk.timers[+el.dataset.ti]?.done && !el.classList.contains('done'))) return draw();
+                    b.querySelectorAll('.clk-tm').forEach(el => { const t = clk.timers[+el.dataset.ti]; if (!t) return; const left = t.running ? t.end - Date.now() : t.left, txt = t.done ? 'Fine' : fmtLeft(left), lf = el.querySelector('[data-left]');
+                        if (lf.textContent !== txt) lf.textContent = txt; el.querySelector('.fg').setAttribute('stroke-dashoffset', C * (1 - Math.max(0, left / t.total))); });
+                    raf = requestAnimationFrame(tick); };
+                if (clk.timers.length) tick();
+            }
+        }
+        async function editAlarm(a) {
+            const DAYS = [[1, 'Lunedì'], [2, 'Martedì'], [3, 'Mercoledì'], [4, 'Giovedì'], [5, 'Venerdì'], [6, 'Sabato'], [0, 'Domenica']];
+            const r = await sheet(win, { title: a ? 'Modifica sveglia' : 'Nuova sveglia', ok: 'Salva', extra: a ? { label: 'Elimina', danger: true } : null, fields: [
+                { name: 'time', type: 'time', label: 'Ora', value: a?.time || '07:00' }, { name: 'label', label: 'Etichetta', value: a?.label || 'Sveglia' },
+                ...DAYS.map(([d, l]) => ({ name: 'd' + d, type: 'checkbox', label: 'Ripeti ' + l.toLowerCase(), value: a?.days?.includes(d) })),
+                { name: 'sound', type: 'select', label: 'Suono', value: a?.sound || 'radar', options: [['radar', 'Radar'], ['campane', 'Campane'], ['beacon', 'Segnale'], ['cristalli', 'Cristalli']] },
+                { name: 'snooze', type: 'checkbox', label: 'Posticipa (9 minuti)', value: a ? a.snooze !== false : true }] });
+            if (!r) return;
+            const list = (S.alarms || []).filter(x => x.id !== a?.id);
+            if (r.__extra) { setSetting('alarms', list); return draw(); }
+            if (!/^\d\d:\d\d$/.test(r.time)) return toast('Ora non valida', { app: 'Orologio' });
+            setSetting('alarms', [...list, { id: a?.id || Date.now().toString(36), time: r.time, label: (r.label || '').slice(0, 60), days: DAYS.map(([d]) => d).filter(d => r['d' + d]), on: true, sound: r.sound, snooze: !!r.snooze }]);
+            draw();
+        }
+        function addTimer(ms, label) { if (ms < 1000) return; clk.timers.push({ total: ms, end: Date.now() + ms, running: true, left: ms, label, done: false }); draw(); drawTimerMini(); }
+        body.addEventListener('click', e => {
+            const t = e.target;
+            const tb = t.closest('[data-tab]'); if (tb) { tab = tb.dataset.tab; results = null; store.set('clock.tab', tab); return draw(); }
+            const ac = t.closest('[data-addcity]'); if (ac) { const r = results.filter(x => x.tz)[+ac.dataset.addcity]; const list = S.clockCities?.length ? S.clockCities : cities(); if (!list.some(c => c.tz === r.tz && c.name === r.name)) setSetting('clockCities', [...list, { name: r.name, tz: r.tz }]); results = null; return draw(); }
+            const rc = t.closest('[data-rmcity]'); if (rc) { setSetting('clockCities', cities().filter((_, i) => i !== +rc.dataset.rmcity)); return draw(); }
+            const pr = t.closest('[data-preset]'); if (pr) return addTimer(+pr.dataset.preset * 60e3, '');
+            if (t.closest('[data-al-on]')) { const id = t.closest('[data-al]').dataset.al; setSetting('alarms', S.alarms.map(a => a.id === id ? { ...a, on: t.checked } : a)); t.closest('.clk-al').classList.toggle('off', !t.checked); return; }
+            if (t.closest(".sw")) return;
+            const alr = t.closest('[data-al]'); if (alr) return editAlarm(S.alarms.find(a => a.id === alr.dataset.al));
+            const a = t.closest('[data-cact]')?.dataset.cact; if (!a) return;
+            const sw = clk.sw, ti = t.closest('[data-ti]'), tm = ti && clk.timers[+ti.dataset.ti];
+            if (a === 'add-alarm') editAlarm(null);
+            if (a === 'start') { sw.start = performance.now(); sw.running = true; draw(); }
+            if (a === 'stop') { sw.acc = swNow(); sw.running = false; draw(); }
+            if (a === 'lap') { sw.laps.push(swNow()); draw(); }
+            if (a === 'reset') { Object.assign(sw, { acc: 0, laps: [], running: false }); draw(); }
+            if (a === 'tstart') { const v = k => +($(`[data-tin="${k}"]`, body).value || 0); addTimer(((v('h') * 60 + v('m')) * 60 + v('s')) * 1000, $('[data-tin="label"]', body).value.trim()); }
+            if (a === 'tpause' && tm) { tm.left = tm.end - Date.now(); tm.running = false; draw(); drawTimerMini(); }
+            if (a === 'tresume' && tm) { tm.end = Date.now() + tm.left; tm.running = true; draw(); drawTimerMini(); }
+            if (a === 'trestart' && tm) { stopRinging(); Object.assign(tm, { end: Date.now() + tm.total, left: tm.total, running: true, done: false }); draw(); drawTimerMini(); }
+            if (a === 'tdel' && tm) { if (tm.done) stopRinging(); clk.timers.splice(+ti.dataset.ti, 1); draw(); drawTimerMini(); }
+        });
+        draw();
+        return {
+            tab: k => { tab = k; draw(); },
+            context: e => {
+                const c = e.target.closest('[data-ci]'); if (c && S.clockCities?.length) { const i = +c.dataset.ci; return [['Rimuovi', () => { setSetting('clockCities', cities().filter((_, j) => j !== i)); draw(); }]]; }
+                const al = e.target.closest('[data-al]'); if (al) { const x = S.alarms.find(a => a.id === al.dataset.al); return [['Modifica…', () => editAlarm(x)], ['Elimina', () => { setSetting('alarms', S.alarms.filter(a => a.id !== x.id)); draw(); }]]; }
+                return null;
+            },
+            menus: () => ({
+                Vista: [['world', 'Ora del mondo'], ['alarm', 'Sveglie'], ['sw', 'Cronometro'], ['timer', 'Timer']].map(([k, l], i) => [check(tab === k, l), () => { tab = k; store.set('clock.tab', k); draw(); }, '⌘' + (i + 1)]),
+                File: [['Nuova sveglia', () => { tab = 'alarm'; draw(); editAlarm(null); }], ['Nuovo timer', () => { tab = 'timer'; draw(); }], '-', ['Chiudi finestra', () => close('clock'), '⌘W']],
+            }),
+        };
+    }
+
     /* ---------- Menu ---------- */
     const ctlOf = id => wins.get(id)?.ctl || {};
     function appInfo(id) {
@@ -3427,6 +3958,7 @@
             <div class="nc-widgets">
                 <div class="nc-w nc-clock"><span id="ncTime"></span><small>${esc(Intl.DateTimeFormat().resolvedOptions().timeZone)}</small></div>
                 <div class="nc-w nc-cal"><strong>${d.toLocaleDateString('it-IT', { month: 'long' })}</strong><div>${cal}</div></div>
+                <div class="nc-w nc-weather" id="ncWeather" data-nc-open="weather"><strong>Meteo</strong><small>…</small></div>
                 <div class="nc-w nc-notes"><strong>Note recenti</strong><div id="ncNotes"><small>Caricamento…</small></div></div>
             </div>
             <div class="nc-list-head"><strong>Notifiche</strong>${list.length ? '<button data-nc="clear">Cancella tutto</button>' : ''}</div>
@@ -3434,6 +3966,7 @@
                 : '<p class="nc-empty">Nessuna notifica</p>'}</div>`;
         const tick2 = () => { const el = $('#ncTime', nc); if (el) el.textContent = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }); };
         tick2();
+        ncWeather($('#ncWeather', nc));
         try {
             const notes = await api('GET', '/notes');
             const box = $('#ncNotes', nc); if (!box) return;
@@ -3452,6 +3985,7 @@
         if (a === 'clear') { store.set('notifications', []); drawNC(); }
         if (a === 'dnd') { dndActive() ? setDnd('off') : dndMenu(e.target.closest('button')); drawNC(); }
         const del = e.target.closest('[data-nc-del]'); if (del) { const l = store.get('notifications', []); l.splice(+del.dataset.ncDel, 1); store.set('notifications', l); drawNC(); }
+        const no = e.target.closest('[data-nc-open]'); if (no) { nc.hidden = true; open(no.dataset.ncOpen); return; }
         const note = e.target.closest('[data-note]'); if (note) { nc.hidden = true; open('notes'); ctlOf('notes').openNote?.(+note.dataset.note); }
     });
     function dndMenu(anchor) {
@@ -3799,7 +4333,7 @@
     tick(); setInterval(tick, 1000);
 
     /* ---------- Dock personalizzabile (salvato nell'account) ---------- */
-    var DOCK_DEFAULT = ['finder', 'launchpad', 'notes', 'reminders', 'contacts', 'photos', 'music', 'webx', 'calculator', 'calendar', 'settings', ...(MARX.user.is_admin ? ['appstore', 'activity'] : [])];
+    var DOCK_DEFAULT = ['finder', 'launchpad', 'notes', 'reminders', 'contacts', 'photos', 'music', 'maps', 'weather', 'clock', 'webx', 'calculator', 'calendar', 'settings', ...(MARX.user.is_admin ? ['appstore', 'activity'] : [])];
     var DOCK_FIXED = ['finder'];  // come sul Mac, il Finder non si toglie
     function dockApps() { return (Array.isArray(S.dockApps) && S.dockApps.length ? S.dockApps : DOCK_DEFAULT).filter(id => APPS[id]); }
     function dockStack() { return Array.isArray(S.dockStack) ? S.dockStack : []; }

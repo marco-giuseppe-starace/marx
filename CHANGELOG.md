@@ -3,7 +3,13 @@
 La versione corrente è in `config/marx.php`.
 Formato: MAGGIORE.MINORE.CORREZIONE. Ogni gruppo di funzioni nuove aumenta il numero MINORE; le sole correzioni aumentano CORREZIONE.
 
-## 0.11.0 «Media» — 2026-10-15
+## 0.12.0 «Mondo» — 2026-10-15
+- Meteo: tempo attuale, previsioni ora per ora (con alba e tramonto) e a 10 giorni, percepita, UV, vento, umidità, pressione; più città salvate nell'account e la tua posizione; sfondo animato in base al tempo; avviso nel Centro notifiche se arrivano pioggia o temporali; widget nel Centro notifiche.
+- Mappe: mappa stradale e satellite, ricerca di indirizzi e luoghi, Casa, Lavoro e luoghi salvati, percorsi in auto, a piedi e in bici con indicazioni passo passo (senza traffico in tempo reale); tasto destro sulla mappa per le indicazioni o per salvare un punto. Gli indirizzi dei Contatti si aprono in Mappe.
+- Orologio: ora del mondo con quadranti, sveglie ripetibili con suono e posticipa (suonano con MarX aperto nel browser), cronometro con giri, più timer insieme visibili nella barra dei menu.
+- I dati arrivano da servizi gratuiti (Open-Meteo, OpenStreetMap, OSRM, Esri) attraverso il server di MarX, con una cache.
+
+ «Media» — 2026-10-15
 - Foto: tutte le immagini dei tuoi file (anche HEIC dell'iPhone) in una libreria per mese, con anteprime veloci; visore con frecce e dati dello scatto; preferiti, album, presentazione a schermo intero; importazione trascinando le foto; «Imposta come sfondo».
 - Anteprima: immagini e PDF con annotazioni (penna, evidenziatore, frecce, rettangoli, ellissi, testo), colori e spessori, annulla e ripeti; sulle immagini ritaglio, rotazione e ridimensionamento; salvataggio come copia o sostituendo l'originale (i PDF annotati restano PDF).
 - Musica: libreria dei file audio per brani, artisti e album con copertine; lettore con coda, casuale e ripeti; playlist; la musica continua a finestra chiusa con il mini lettore nella barra dei menu; tasti multimediali.

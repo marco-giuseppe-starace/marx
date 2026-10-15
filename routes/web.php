@@ -6,6 +6,7 @@ use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\FileController;
+use App\Http\Controllers\GeoController;
 use App\Http\Controllers\MediaController;
 use App\Http\Controllers\NoteController;
 use App\Http\Controllers\ReminderController;
@@ -72,6 +73,14 @@ Route::middleware('auth')->group(function () {
     Route::post('/media/playlists', [MediaController::class, 'storePlaylist']);
     Route::put('/media/playlists/{id}', [MediaController::class, 'updatePlaylist'])->whereNumber('id');
     Route::delete('/media/playlists/{id}', [MediaController::class, 'destroyPlaylist'])->whereNumber('id');
+    Route::middleware('throttle:geo')->group(function () {
+        Route::get('/geo/weather', [GeoController::class, 'weather']);
+        Route::get('/geo/cities', [GeoController::class, 'cities']);
+        Route::get('/geo/search', [GeoController::class, 'search']);
+        Route::get('/geo/reverse', [GeoController::class, 'reverse']);
+        Route::post('/geo/route', [GeoController::class, 'route']);
+    });
+    Route::get('/geo/tile/{layer}/{z}/{x}/{y}', [GeoController::class, 'tile'])->whereNumber(['z', 'x', 'y'])->middleware('throttle:tiles');
 
     Route::get('/reminders', [ReminderController::class, 'index']);
     Route::post('/reminders', [ReminderController::class, 'store']);
