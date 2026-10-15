@@ -5,6 +5,7 @@ Formato: MAGGIORE.MINORE.CORREZIONE. Ogni gruppo di funzioni nuove aumenta il nu
 
 ## 0.9.1 — 2026-10-15
 - Correzione: il numero di download dei link condivisi appena creati ora mostra 0 invece di un valore vuoto.
+- Aggiornamento software: le librerie vengono installate rispettando i permessi del server (il primo tentativo di aggiornamento falliva e tornava alla versione precedente).
 
 ## 0.9.0 «File» — 2026-10-15
 - Finder con tre viste (icone, elenco ordinabile, colonne con anteprima), selezione multipla (Ctrl/Maiusc e riquadro) e scorciatoie da tastiera.

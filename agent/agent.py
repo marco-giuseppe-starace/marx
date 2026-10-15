@@ -660,6 +660,20 @@ def db_restore(path):
         subprocess.run(['mysql', '-u', env_value('DB_USERNAME'), '-h', env_value('DB_HOST') or '127.0.0.1', env_value('DB_DATABASE')], stdin=f, env=env, timeout=600, check=True)
 
 
+def install_deps():
+    """Librerie PHP: Composer gira come proprietario del codice ma senza script; la scoperta dei pacchetti
+    di Laravel (che scrive in bootstrap/cache, dell'utente web) gira come www-data dopo aver tolto le cache vecchie."""
+    rc, out = as_owner('composer', 'install', '--no-interaction', '--no-dev', '--optimize-autoloader', '--no-scripts', '--quiet', timeout=900)
+    if rc != 0:
+        return rc, out
+    for f in ('packages.php', 'services.php', 'config.php', 'routes-v7.php', 'events.php'):
+        try:
+            os.remove(f'{CODE}/bootstrap/cache/{f}')
+        except FileNotFoundError:
+            pass
+    return as_web('php', 'artisan', 'package:discover', '--no-interaction')
+
+
 def site_ok():
     import urllib.request
     url = (env_value('APP_URL') or 'http://127.0.0.1').rstrip('/') + '/login'
@@ -705,7 +719,7 @@ def do_system_update(jid, _app, target):
                 raise RuntimeError('La nuova versione non si applica alla copia installata: ' + out[-300:])
 
             step(jid, 50, 'Installazione delle librerie…')
-            rc, out = as_owner('composer', 'install', '--no-interaction', '--no-dev', '--optimize-autoloader', '--quiet', timeout=900)
+            rc, out = install_deps()
             if rc != 0:
                 raise RuntimeError('Installazione delle librerie non riuscita: ' + out[-300:])
 
@@ -737,7 +751,7 @@ def do_system_update(jid, _app, target):
             if prev:
                 step(jid, 95, 'Ripristino della versione precedente…')
                 as_owner('git', 'reset', '--hard', '--quiet', prev)
-                as_owner('composer', 'install', '--no-interaction', '--no-dev', '--optimize-autoloader', '--quiet', timeout=900)
+                install_deps()
                 if dump and touched_db:
                     try:
                         db_restore(dump)
