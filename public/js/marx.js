@@ -174,7 +174,7 @@
         webx:       { name: 'webX',         icon: 'webx',     w: 1120, h: 720, render: webx },
         calendar:   { name: 'Calendario',   icon: 'calendar', w: 380, h: 400, render: calendar },
         settings:   { name: 'Impostazioni', icon: 'settings', w: 820, h: 600, render: settings },
-        about:      { name: 'Info su MarX', icon: 'disk',     w: 340, h: 330, render: about, fixed: true },
+        about:      { name: 'Info su MarX', icon: 'disk',     w: 360, h: 380, render: about, fixed: true },
         trash:      { name: 'Cestino',      icon: 'trash',    special: true },
         launchpad:  { name: 'Launchpad',    icon: 'launchpad', special: true },
         appstore:   { name: 'Soft Store',    icon: 'appstore', w: 980, h: 620, render: appstore, admin: true },
@@ -1537,7 +1537,13 @@
 
     function about(body) {
         body.innerHTML = `<div class="about"><div class="logo"><svg viewBox="0 0 24 24" width="46" height="46"><path d="M3 20V4l9 9 9-9v16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/></svg></div>
-            <h2>${esc(MARX.name)}</h2><p>Versione ${esc(MARX.version)} «${esc(MARX.codename)}»</p><p style="margin-top:10px">Basato su Laravel ${esc(MARX.laravel)}</p><p>© ${new Date().getFullYear()} Marco Starace</p></div>`;
+            <h2>${esc(MARX.name)}</h2><p>Versione ${esc(MARX.version)} «${esc(MARX.codename)}»</p><p style="margin-top:10px">Basato su Laravel ${esc(MARX.laravel)}</p>
+            <div class="about-acts">${MARX.user.is_admin ? '<button class="btn" data-about="update">Aggiornamento software…</button>' : ''}<button class="btn" data-about="news">Novità</button></div><p>© ${new Date().getFullYear()} Marco Starace</p></div>`;
+        body.onclick = e => {
+            const a = e.target.closest('[data-about]')?.dataset.about;
+            if (a === 'update') openSettings('aggiornamento');
+            if (a === 'news') window.open('https://github.com/marco-giuseppe-starace/marx/blob/main/CHANGELOG.md', '_blank', 'noopener');
+        };
     }
 
 

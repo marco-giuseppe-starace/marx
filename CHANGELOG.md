@@ -3,6 +3,9 @@
 La versione corrente è in `config/marx.php`.
 Formato: MAGGIORE.MINORE.CORREZIONE. Ogni gruppo di funzioni nuove aumenta il numero MINORE; le sole correzioni aumentano CORREZIONE.
 
+## 0.9.2 — 2026-10-15
+- «Info su MarX» ha i pulsanti «Novità» e «Aggiornamento software…».
+
 ## 0.9.1 — 2026-10-15
 - Correzione: il numero di download dei link condivisi appena creati ora mostra 0 invece di un valore vuoto.
 - Aggiornamento software: le librerie vengono installate rispettando i permessi del server (il primo tentativo di aggiornamento falliva e tornava alla versione precedente).
