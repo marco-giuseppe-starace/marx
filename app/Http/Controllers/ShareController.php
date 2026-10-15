@@ -51,7 +51,7 @@ class ShareController extends Controller
         return [
             'id' => $s->id, 'path' => $s->path, 'name' => basename($s->path), 'type' => $s->type,
             'url' => $s->token ? url('/s/'.$s->token) : null, 'protected' => (bool) $s->password,
-            'expires' => $s->expires_at?->timestamp, 'expired' => $s->expired(), 'downloads' => $s->downloads,
+            'expires' => $s->expires_at?->timestamp, 'expired' => $s->expired(), 'downloads' => (int) $s->downloads,
             'with' => $s->target?->only('name', 'email'), 'created' => $s->created_at->timestamp,
         ];
     }
