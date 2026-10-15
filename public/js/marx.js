@@ -45,24 +45,27 @@
     }
     // Dialogo a tendina dentro una finestra. fields: [{name, label, type, value}]
     // Campi: {name, label, value} testo; {type:'select', options:[[valore, etichetta]]}; {type:'checkbox', value:bool}
-    function sheet(win, { title, fields = [], ok = 'OK', danger = false, text = '', cancel = true }) {
+    function sheet(win, { title, fields = [], ok = 'OK', danger = false, text = '', cancel = true, extra = null }) {
         return new Promise(resolve => {
             $('.sheet-bg', win)?.remove();
             const field = f => {
                 if (f.type === 'select') return `<label class="sheet-row">${esc(f.label)}<select name="${f.name}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(f.value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
                 if (f.type === 'checkbox') return `<label class="sheet-check"><input type="checkbox" name="${f.name}" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label>`;
+                if (['date', 'time', 'datetime-local'].includes(f.type)) return `<label class="sheet-row">${esc(f.label)}<input name="${f.name}" type="${f.type}" value="${esc(f.value)}"></label>`;
+                if (f.type === 'textarea') return `<textarea name="${f.name}" placeholder="${esc(f.label)}" aria-label="${esc(f.label)}" rows="3">${esc(f.value)}</textarea>`;
                 return `<input name="${f.name}" type="${f.type || 'text'}" value="${esc(f.value)}" placeholder="${esc(f.label)}" aria-label="${esc(f.label)}">`;
             };
             const bg = document.createElement('div'); bg.className = 'sheet-bg';
             bg.innerHTML = `<form class="sheet"><h4>${esc(title)}</h4>${text ? `<p style="margin:0;color:var(--muted)">${esc(text)}</p>` : ''}
                 ${fields.map(field).join('')}
-                <div class="acts">${cancel ? '<button type="button" class="btn" data-x>Annulla</button>' : ''}<button class="btn ${danger ? 'danger' : 'primary'}">${esc(ok)}</button></div></form>`;
+                <div class="acts">${extra ? `<button type="button" class="btn ${extra.danger ? 'danger' : ''}" data-extra style="margin-right:auto">${esc(extra.label)}</button>` : ''}${cancel ? '<button type="button" class="btn" data-x>Annulla</button>' : ''}<button class="btn ${danger ? 'danger' : 'primary'}">${esc(ok)}</button></div></form>`;
             win.append(bg);
             const form = $('form', bg), first = $('input[type=text], input:not([type])', form);
             if (first) { first.focus(); first.setSelectionRange(0, first.value.lastIndexOf('.') > 0 ? first.value.lastIndexOf('.') : first.value.length); }
             else $('.btn:last-child', form).focus();
             const done = v => { bg.remove(); resolve(v); };
             if (cancel) $('[data-x]', form).onclick = () => done(null);
+            if (extra) $('[data-extra]', form).onclick = () => done({ __extra: true });
             form.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); done(null); } };
             form.onsubmit = e => {
                 e.preventDefault();
@@ -93,7 +96,7 @@
         ],
         dndUntil: 0, sounds: true, soundVolume: 0.5, notifySound: 'vetro', startupSound: true,
         screensaverMinutes: 0, screensaverStyle: 'aurora', shortcuts: {},
-        stageManager: false, tiling: true, desktopStacks: false, hotTL: 'none', hotTR: 'none', hotBL: 'none', hotBR: 'none',
+        stageManager: false, tiling: true, desktopStacks: false, deskAlign: true, deskSort: 'none', deskPositions: {}, hotTL: 'none', hotTR: 'none', hotBL: 'none', hotBR: 'none',
         cursorStyle: 'mac', cursorSize: 1, cursorFill: '#000000', cursorOutline: '#ffffff', shakeToLocate: true, titlebarDoubleClick: 'maximize',
     };
     const S = { ...DEFAULTS, ...(MARX.settings || {}) };
@@ -172,7 +175,10 @@
         notes:      { name: 'Note',         icon: 'notes',    w: 700, h: 460, render: notes },
         calculator: { name: 'Calcolatrice', icon: 'calc',     w: 250, h: 390, render: calculator, fixed: true },
         webx:       { name: 'webX',         icon: 'webx',     w: 1120, h: 720, render: webx },
-        calendar:   { name: 'Calendario',   icon: 'calendar', w: 380, h: 400, render: calendar },
+        reminders:  { name: 'Promemoria',   icon: 'reminders', w: 860, h: 580, render: reminders },
+        contacts:   { name: 'Contatti',     icon: 'contacts', w: 900, h: 600, render: contacts },
+        textedit:   { name: 'TextEdit',     icon: 'textedit', w: 760, h: 560, render: (b, w) => textEditor(b, w, null) },
+        calendar:   { name: 'Calendario',   icon: 'calendar', w: 1000, h: 660, render: calendar },
         settings:   { name: 'Impostazioni', icon: 'settings', w: 820, h: 600, render: settings },
         about:      { name: 'Info su MarX', icon: 'disk',     w: 360, h: 380, render: about, fixed: true },
         trash:      { name: 'Cestino',      icon: 'trash',    special: true },
@@ -290,8 +296,9 @@
         }
     }
 
-    function close(id) {
+    function close(id, force = false) {
         const w = wins.get(id); if (!w) return;
+        if (!force && w.ctl?.confirmClose) { w.ctl.confirmClose().then(ok => ok && close(id, true)); return; }
         if (w.animate && !reduceMotion()) w.animate([{ transform: 'none', opacity: 1 }, { transform: 'scale(.94)', opacity: 0 }], { duration: 160, easing: 'ease-in', fill: 'forwards' });
         else w.classList.add('closing');
         setTimeout(() => { w.remove(); wins.delete(id); mru = mru.filter(x => x !== id); if (active === id) { active = null; focusTop(); } updateDock(); saveSession(); layoutStage(); }, 150);
@@ -716,7 +723,8 @@
             const k = kindOf(it.name, it.type);
             if (k === 'zip') return unzip(it);
             if (k === 'img' || k === 'pdf') return openPreview(it.name, fileUrl(full(it), true), k);
-            if (['video', 'audio', 'text'].includes(k)) return quickLook([qlItem(it, full(it))]);
+            if (k === 'text') return openTextEdit(full(it));
+            if (['video', 'audio'].includes(k)) return quickLook([qlItem(it, full(it))]);
             location.href = fileUrl(full(it));
         }
         function look() {
@@ -734,6 +742,12 @@
             const r = await sheet(win, { title: 'Nuova cartella', fields: [{ name: 'name', label: 'Nome', value: 'Cartella senza titolo' }], ok: 'Crea' });
             if (!r) return;
             try { await api('POST', '/files/folder', { path, name: r.name }); filesChanged(); } catch (e) { toast(e.message, { app: 'Finder' }); }
+        }
+        async function newTextDoc() {
+            const r = await sheet(win, { title: 'Nuovo documento di testo', ok: 'Crea', fields: [{ name: 'name', label: 'Nome', value: 'Senza titolo.txt' }] });
+            if (!r) return;
+            const name = /\.[a-z0-9]{1,8}$/i.test(r.name) ? r.name : r.name + '.txt', p = path ? path + '/' + name : name;
+            try { await api('POST', '/files/save', { path: p, content: '' }); filesChanged(); openTextEdit(p); } catch (e) { toast(e.message, { app: 'Finder' }); }
         }
         async function upload(fileList) {
             if (!fileList.length) return;
@@ -782,6 +796,7 @@
             if (many.length > 1) return [['Quick Look', look, 'Spazio'], ['Comprimi ' + many.length + ' elementi', () => compress(many)], '-', ...tagMenu(many.map(full), allTags), '-', ['Sposta nel Cestino', () => trashSel(many), 'Canc']];
             return [
                 ['Apri', () => openItem(it), '↵'], ['Quick Look', look, 'Spazio'], '-',
+                ...(k === 'text' || (it.type === 'file' && it.size < 5e6 && k === 'other') ? [['Apri con TextEdit', () => openTextEdit(full(it))]] : []),
                 ['Rinomina…', () => rename(it), 'F2'], ['Duplica', () => duplicate(it)], ['Comprimi «' + it.name + '»', () => compress([it])], ...(k === 'zip' ? [['Estrai qui', () => unzip(it)]] : []),
                 ...(it.type === 'file' ? [['Scarica', () => { location.href = fileUrl(full(it)); }]] : []), '-',
                 ...tagMenu([full(it)], it.tags || []), '-',
@@ -831,7 +846,7 @@
             const f = e.target.closest('[data-i]');
             if (f) { const i = +f.dataset.i; if (!sel.has(i)) select(i); return contextMenu(e.clientX, e.clientY, itemMenu(items[i])); }
             contextMenu(e.clientX, e.clientY, loc === 'trash' ? [['Svuota il Cestino…', items.length && (() => purge())]]
-                : loc === 'files' ? [['Nuova cartella', mkdir], ['Carica file…', () => picker.click()], '-', ...viewMenu(), '-', ...sortMenu(), '-', ['Aggiorna', () => load(loc, path, false)], ['Impostazioni Finder…', prefsSheet]]
+                : loc === 'files' ? [['Nuova cartella', mkdir], ['Nuovo documento di testo', newTextDoc], ['Carica file…', () => picker.click()], '-', ...viewMenu(), '-', ...sortMenu(), '-', ['Aggiorna', () => load(loc, path, false)], ['Impostazioni Finder…', prefsSheet]]
                 : [...viewMenu(), '-', ['Aggiorna', () => load(loc, path, false)]]);
         });
         // Selezione a riquadro (vista icone ed elenco)
@@ -899,6 +914,7 @@
         load('files', store.get('finder.path', ''), false);
         return {
             go: (l, p = '') => load(l, p),
+            currentPath: () => (loc === 'files' ? path : null),
             reveal: async (p, type) => {
                 const dir = type === 'folder' ? p : p.split('/').slice(0, -1).join('/');
                 await load('files', dir);
@@ -922,77 +938,173 @@
         };
     }
 
-    /* ---------- Scrivania: i file della cartella «Scrivania», con le pile ---------- */
+    /* ---------- Scrivania: icone libere (posizioni salvate nell'account), file della cartella «Scrivania», pile ---------- */
     function desktopFiles() {
         const box = $('.desktop-icons');
-        const SYSTEM = box.innerHTML;  // Documenti, Note, MarX HD
-        let files = [], sel = null, openStack = null;
+        const CW = 100, CH = 112, M = 14;
+        const SYS = [{ key: 'sys:finder', open: 'finder', icon: 'folder', label: 'Documenti' }, { key: 'sys:notes', open: 'notes', icon: 'notes', label: 'Note' }, { key: 'sys:about', open: 'about', icon: 'disk', label: 'MarX HD' }];
+        let files = [], sel = new Set(), openStack = null, layout = [];
         async function load() {
             try { const d = await api('GET', '/files?path=Scrivania'); files = d.items; setTrashFull(d.trash); } catch { files = []; }
             draw();
         }
-        function draw() {
-            let html = SYSTEM;
+        const area = () => ({ w: box.clientWidth || innerWidth, h: (box.clientHeight || innerHeight - 28) - (S.dockAutohide ? 10 : S.dockSize + 30) });
+        // Celle della griglia: dall'alto a destra, a colonne (come sul Mac)
+        function cells() {
+            const { w, h } = area(), out = [], rows = Math.max(1, Math.floor((h - M) / CH)), cols = Math.max(1, Math.floor((w - M) / CW));
+            for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) out.push([w - M - CW * (c + 1), M + r * CH]);
+            return out;
+        }
+        const nearestCell = (x, y, taken) => cells().filter(([cx, cy]) => !taken.some(([tx, ty]) => Math.abs(tx - cx) < CW / 2 && Math.abs(ty - cy) < CH / 2))
+            .sort((a, b) => Math.hypot(a[0] - x, a[1] - y) - Math.hypot(b[0] - x, b[1] - y))[0] || [x, y];
+        function entries() {
+            const sortFn = { name: (a, b) => a.name.localeCompare(b.name, 'it', { numeric: true }), kind: (a, b) => kindName(a).localeCompare(kindName(b), 'it') || a.name.localeCompare(b.name, 'it'),
+                date: (a, b) => (b.modified || 0) - (a.modified || 0) }[S.deskSort];
+            const list = sortFn ? [...files].sort(sortFn) : files;
+            const out = SYS.map(s => ({ ...s, type: 'sys' }));
             if (S.desktopStacks) {
                 const groups = {};
-                files.forEach(f => { const g = KIND_INFO[kindOf(f.name, f.type)][2]; (groups[g] ||= []).push(f); });
-                Object.entries(groups).forEach(([g, list]) => {
-                    if (list.length === 1) { html += fileHTML(list[0]); return; }
-                    html += `<button class="desk-icon desk-stack ${openStack === g ? 'open' : ''}" data-stack="${esc(g)}"><span class="stack-icons">${list.slice(0, 3).map(fileIcon).join('')}</span><span>${esc(g)} (${list.length})</span></button>`;
-                    if (openStack === g) html += list.map(fileHTML).join('');
+                list.forEach(f => { const g = KIND_INFO[kindOf(f.name, f.type)][2]; (groups[g] ||= []).push(f); });
+                Object.entries(groups).forEach(([g, items]) => {
+                    if (items.length === 1) out.push({ key: 'f:' + items[0].name, type: 'file', f: items[0] });
+                    else { out.push({ key: 's:' + g, type: 'stack', g, items }); if (openStack === g) items.forEach(f => out.push({ key: 'f:' + f.name, type: 'file', f, inStack: true, temp: true })); }
                 });
-            } else html += files.map(fileHTML).join('');
-            box.innerHTML = html;
+            } else list.forEach(f => out.push({ key: 'f:' + f.name, type: 'file', f }));
+            return out;
         }
-        const fileHTML = f => `<button class="desk-icon desk-file ${sel === f.name ? 'sel' : ''} ${openStack && KIND_INFO[kindOf(f.name, f.type)][2] === openStack ? 'in-stack' : ''}" data-dfile="${esc(f.name)}" draggable="true" ${f.type === 'folder' ? `data-drop-path="Scrivania/${esc(f.name)}"` : ''}>
-            ${kindOf(f.name, f.type) === 'img' && f.size < 8e6 ? `<span class="ico ico-thumb"><img src="${esc(fileUrl('Scrivania/' + f.name, true))}" alt=""></span>` : fileIcon(f)}<span>${esc(f.name)}</span>${tagDots(f.tags)}</button>`;
-        const fileOf = el => files.find(f => f.name === el.dataset.dfile);
+        function place() {
+            const pos = S.deskPositions || {}, { w, h } = area(), taken = [];
+            layout = entries();
+            layout.forEach(e => { const p = !e.temp && pos[e.key]; if (p) { e.x = Math.min(Math.max(0, p[0]), w - CW); e.y = Math.min(Math.max(0, p[1]), h - CH + 20); taken.push([e.x, e.y]); } });
+            const free = cells().filter(([cx, cy]) => !taken.some(([tx, ty]) => Math.abs(tx - cx) < CW / 2 && Math.abs(ty - cy) < CH / 2));
+            layout.filter(e => e.x == null).forEach(e => { const c = free.shift() || [M, M]; e.x = c[0]; e.y = c[1]; });
+        }
+        function iconHTML(e) {
+            const common = `class="desk-icon ${sel.has(e.key) ? 'sel' : ''} ${e.inStack ? 'in-stack' : ''} ${e.type === 'stack' && openStack === e.g ? 'open' : ''}" data-key="${esc(e.key)}" style="left:${e.x}px;top:${e.y}px"`;
+            if (e.type === 'sys') return `<button ${common} data-open="${e.open}"><span class="ico ico-${e.icon}"></span><span>${esc(e.label)}</span></button>`;
+            if (e.type === 'stack') return `<button ${common} data-stack="${esc(e.g)}"><span class="stack-icons">${e.items.slice(0, 3).map(fileIcon).join('')}</span><span>${esc(e.g)} (${e.items.length})</span></button>`;
+            const f = e.f, thumb = kindOf(f.name, f.type) === 'img' && f.size < 8e6 ? `<span class="ico ico-thumb"><img src="${esc(fileUrl('Scrivania/' + f.name, true))}" alt="" draggable="false"></span>` : fileIcon(f);
+            return `<button ${common} data-dfile="${esc(f.name)}" ${f.type === 'folder' ? `data-drop-path="Scrivania/${esc(f.name)}"` : ''}>${thumb}<span>${esc(f.name)}</span>${tagDots(f.tags)}</button>`;
+        }
+        function draw() { place(); box.innerHTML = layout.map(iconHTML).join(''); }
+        const entryOf = el => layout.find(e => e.key === el.dataset.key);
+        function savePositions(changes) {
+            const valid = new Set(layout.filter(e => !e.temp).map(e => e.key));
+            const next = Object.fromEntries(Object.entries({ ...(S.deskPositions || {}), ...changes }).filter(([k]) => valid.has(k)));
+            setSetting('deskPositions', next);
+        }
         const openFile = f => {
             if (f.type === 'folder') { open('finder'); return ctlOf('finder').go?.('files', 'Scrivania/' + f.name); }
             const k = kindOf(f.name, f.type);
             if (k === 'img' || k === 'pdf') return openPreview(f.name, fileUrl('Scrivania/' + f.name, true), k);
+            if (k === 'text') return openTextEdit('Scrivania/' + f.name);
             quickLook([qlItem(f, 'Scrivania/' + f.name)]);
         };
-        box.addEventListener('click', e => {
-            const st = e.target.closest('[data-stack]'); if (st) { openStack = openStack === st.dataset.stack ? null : st.dataset.stack; return draw(); }
-            const el = e.target.closest('[data-dfile]'); sel = el ? el.dataset.dfile : null;
-            box.querySelectorAll('[data-dfile]').forEach(x => x.classList.toggle('sel', x.dataset.dfile === sel));
+        // Trascinamento con il puntatore: sposta l'icona, oppure il file se rilasciato su cartella, Finder o Cestino
+        let suppressClick = false;
+        box.addEventListener('pointerdown', e => {
+            const el = e.target.closest('.desk-icon'); if (!el || e.button !== 0) return;
+            const ent = entryOf(el); if (!ent) return;
+            if (e.ctrlKey || e.metaKey) { sel.has(ent.key) ? sel.delete(ent.key) : sel.add(ent.key); }
+            else if (!sel.has(ent.key)) sel = new Set([ent.key]);
+            box.querySelectorAll('.desk-icon').forEach(x => x.classList.toggle('sel', sel.has(x.dataset.key)));
+            const moving = [...box.querySelectorAll('.desk-icon')].filter(x => sel.has(x.dataset.key) && !entryOf(x)?.temp);
+            const start = moving.map(x => [x, x.offsetLeft, x.offsetTop]);
+            let dragging = false, target = null;
+            const move = ev => {
+                const dx = ev.clientX - e.clientX, dy = ev.clientY - e.clientY;
+                if (!dragging && Math.hypot(dx, dy) < 5) return;
+                if (!dragging) { dragging = true; moving.forEach(x => x.classList.add('dragging')); }
+                start.forEach(([x, l, t]) => { x.style.left = l + dx + 'px'; x.style.top = t + dy + 'px'; });
+                const under = document.elementFromPoint(ev.clientX, ev.clientY);
+                const t = under?.closest('.dock-item[data-open="trash"], .desk-icon[data-drop-path], .window [data-drop-path], .window .fview');
+                if (t !== target) { target?.classList.remove('drop'); target = t && !moving.includes(t) ? t : null; target?.classList.add('drop'); }
+            };
+            const up = async ev => {
+                removeEventListener('pointermove', move); removeEventListener('pointerup', up);
+                moving.forEach(x => x.classList.remove('dragging')); target?.classList.remove('drop');
+                if (!dragging) return;
+                suppressClick = true; setTimeout(() => { suppressClick = false; });
+                const paths = moving.map(entryOf).filter(x => x?.type === 'file').map(x => 'Scrivania/' + x.f.name);
+                if (target && paths.length) {
+                    try {
+                        if (target.matches('.dock-item')) { const r = await api('DELETE', '/files', { paths }); playSound('trash'); setTrashFull(r.trash); }
+                        else {
+                            const to = target.dataset.dropPath ?? (target.closest('.window') === wins.get('finder') ? ctlOf('finder').currentPath?.() : null);
+                            if (to == null) return draw();
+                            await api('POST', '/files/move', { paths, to });
+                        }
+                        return filesChanged();
+                    } catch (err) { toast(err.message); return draw(); }
+                }
+                if (target) return draw();  // le icone di sistema e le pile non si spostano dentro le cartelle
+                // Nuova posizione (agganciata alla griglia se «Mantieni allineate»)
+                const changes = {}, others = layout.filter(x => !sel.has(x.key)).map(x => [x.x, x.y]);
+                start.forEach(([x]) => {
+                    let p = [x.offsetLeft, x.offsetTop];
+                    if (S.deskAlign) { p = nearestCell(p[0], p[1], others); others.push(p); x.style.left = p[0] + 'px'; x.style.top = p[1] + 'px'; }
+                    changes[x.dataset.key] = [Math.round(p[0]), Math.round(p[1])];
+                });
+                savePositions(changes); draw();
+            };
+            addEventListener('pointermove', move); addEventListener('pointerup', up);
         });
-        box.addEventListener('dblclick', e => { const el = e.target.closest('[data-dfile]'); if (el) openFile(fileOf(el)); });
+        box.addEventListener('click', e => {
+            if (suppressClick) return;
+            const st = e.target.closest('[data-stack]'); if (st) { openStack = openStack === st.dataset.stack ? null : st.dataset.stack; draw(); }
+        });
+        $('#desktop').addEventListener('pointerdown', e => { if (!e.target.closest('.desk-icon, .window') && sel.size) { sel.clear(); box.querySelectorAll('.desk-icon.sel').forEach(x => x.classList.remove('sel')); } });
+        box.addEventListener('dblclick', e => { const el = e.target.closest('[data-dfile]'); if (el) openFile(entryOf(el).f); });
         addEventListener('keydown', e => {
-            if (e.key !== ' ' || !sel || e.target.closest?.('input, textarea, [contenteditable], .window')) return;
-            const f = files.find(x => x.name === sel); if (!f) return;
+            if (e.key !== ' ' || e.target.closest?.('input, textarea, [contenteditable], .window')) return;
+            const f = layout.find(x => sel.has(x.key) && x.type === 'file')?.f; if (!f) return;
             e.preventDefault(); quickLook([qlItem(f, 'Scrivania/' + f.name)]);
         });
         box.addEventListener('contextmenu', e => {
             const el = e.target.closest('[data-dfile]'); if (!el) return;
             e.preventDefault(); e.stopPropagation();
-            const f = fileOf(el), p = 'Scrivania/' + f.name; sel = f.name; draw();
-            const win = wins.get('finder') || document.body;
+            const f = entryOf(el).f, p = 'Scrivania/' + f.name;
+            const host = () => { if (!wins.has('finder')) open('finder'); return wins.get('finder'); };
             contextMenu(e.clientX, e.clientY, [
                 ['Apri', () => openFile(f)], ['Quick Look', () => quickLook([qlItem(f, p)])], '-',
-                ['Rinomina…', async () => { const r = await sheet(win === document.body ? (open('finder'), wins.get('finder')) : win, { title: 'Rinomina', fields: [{ name: 'name', label: 'Nuovo nome', value: f.name }], ok: 'Rinomina' }); if (r && r.name !== f.name) try { await api('POST', '/files/rename', { path: p, name: r.name }); filesChanged(); } catch (err) { toast(err.message); } }],
+                ['Rinomina…', async () => { const r = await sheet(host(), { title: 'Rinomina', fields: [{ name: 'name', label: 'Nuovo nome', value: f.name }], ok: 'Rinomina' });
+                    if (r && r.name !== f.name) try { await api('POST', '/files/rename', { path: p, name: r.name }); const pos = S.deskPositions?.['f:' + f.name]; if (pos) savePositions({ ['f:' + r.name]: pos }); filesChanged(); } catch (err) { toast(err.message); } }],
                 ['Mostra nel Finder', () => { open('finder'); ctlOf('finder').reveal?.(p, f.type); }], '-',
                 ...tagMenu([p], f.tags || []), '-',
                 ['Sposta nel Cestino', async () => { try { const r = await api('DELETE', '/files', { paths: [p] }); playSound('trash'); setTrashFull(r.trash); filesChanged(); } catch (err) { toast(err.message); } }],
             ]);
         });
-        box.addEventListener('dragstart', e => {
-            const el = e.target.closest('[data-dfile]'); if (!el) return;
-            e.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ paths: ['Scrivania/' + el.dataset.dfile] })); e.dataTransfer.effectAllowed = 'move';
-        });
-        // Rilascio sulla scrivania: sposta o carica nella cartella «Scrivania»
+        // Dal Finder (o dal computer) alla scrivania: sposta o carica nella cartella «Scrivania», nel punto di rilascio
         const desk = $('#desktop');
         desk.addEventListener('dragover', e => { if (acceptsDrop(e) && !e.target.closest('.window')) { e.preventDefault(); const f = e.target.closest('[data-drop-path]'); box.querySelectorAll('.drop').forEach(x => x !== f && x.classList.remove('drop')); f?.classList.add('drop'); } });
         desk.addEventListener('drop', e => {
             if (e.target.closest('.window')) return;
             e.preventDefault(); box.querySelectorAll('.drop').forEach(x => x.classList.remove('drop'));
             const f = e.target.closest('[data-drop-path]');
-            dropFiles(e, { path: f ? f.dataset.dropPath : 'Scrivania' });
+            if (!f) {
+                // il file comparirà dove è stato lasciato
+                const r = box.getBoundingClientRect(), x = e.clientX - r.left - CW / 2, y = e.clientY - r.top - 30;
+                const raw = e.dataTransfer.getData(DRAG_TYPE);
+                const names = raw ? JSON.parse(raw).paths.map(p => p.split('/').pop()) : [...(e.dataTransfer.files || [])].map(x => x.name);
+                const changes = {}; names.forEach((n, i) => { changes['f:' + n] = S.deskAlign ? nearestCell(x, y + i * CH, []) : [Math.round(x), Math.round(y + i * CH)]; });
+                S.deskPositions = { ...(S.deskPositions || {}), ...changes };
+            }
+            dropFiles(e, { path: f ? f.dataset.dropPath : 'Scrivania' }).then(() => setTimeout(() => savePositions({}), 1500));
         });
         addEventListener('marx:files', load);
-        return { load, draw };
+        addEventListener('resize', () => draw());
+        return {
+            load, draw,
+            menu: () => [
+                ['Nuova cartella sulla scrivania', async () => { try { await api('POST', '/files/folder', { path: 'Scrivania', name: 'Cartella senza titolo' }); filesChanged(); } catch (e) { toast(e.message); } }],
+                [check(S.desktopStacks, 'Usa pile'), () => { setSetting('desktopStacks', !S.desktopStacks); draw(); }], '-',
+                ['Riordina', () => { const taken = [], changes = {}; layout.filter(x => !x.temp).forEach(x => { const c = nearestCell(x.x, x.y, taken); taken.push(c); changes[x.key] = c; }); savePositions(changes); draw(); }],
+                [check(S.deskAlign, 'Mantieni allineate'), () => { setSetting('deskAlign', !S.deskAlign); if (!S.deskAlign) return; const taken = [], changes = {}; layout.filter(x => !x.temp).forEach(x => { const c = nearestCell(x.x, x.y, taken); taken.push(c); changes[x.key] = c; }); savePositions(changes); draw(); }],
+                ...[['name', 'nome'], ['kind', 'tipo'], ['date', 'data di modifica']].map(([k, l]) => [check(S.deskSort === k, 'Ordina per ' + l), () => { setSetting('deskSort', k); setSetting('deskPositions', {}); draw(); }]),
+            ],
+        };
     }
+
 
     function openPreview(name, url, kind) {
         const id = 'preview';
@@ -1152,41 +1264,6 @@
         };
     }
 
-    function calendar(body, win) {
-        let d = new Date(); d.setDate(1);
-        let P = prefs('calendar', { monday: true, weekends: true });
-        const draw = () => {
-            const y = d.getFullYear(), m = d.getMonth(), wd = new Date(y, m, 1).getDay(), first = P.monday ? (wd + 6) % 7 : wd, days = new Date(y, m + 1, 0).getDate(), t = new Date();
-            const names = P.monday ? ['L', 'M', 'M', 'G', 'V', 'S', 'D'] : ['D', 'L', 'M', 'M', 'G', 'V', 'S'];
-            let g = names.map(x => `<span class="dow">${x}</span>`).join('') + '<span></span>'.repeat(first);
-            for (let i = 1; i <= days; i++) {
-                const dow = new Date(y, m, i).getDay(), we = dow === 0 || dow === 6;
-                g += `<span class="${y === t.getFullYear() && m === t.getMonth() && i === t.getDate() ? 'today' : ''}" style="${we && P.weekends ? 'color:var(--muted)' : ''}">${i}</span>`;
-            }
-            body.innerHTML = `<div class="cal"><header><button data-d="-1" aria-label="Mese precedente">‹</button><h3>${d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}</h3><button data-d="1" aria-label="Mese successivo">›</button></header><div class="cal-grid">${g}</div></div>`;
-            body.querySelectorAll('[data-d]').forEach(b => b.onclick = () => move(+b.dataset.d));
-        };
-        const move = n => { d.setMonth(d.getMonth() + n); draw(); };
-        const today = () => { d = new Date(); d.setDate(1); draw(); };
-        const setPref = (k, v) => { P = { ...P, [k]: v }; savePrefs('calendar', P); draw(); };
-        const prefsSheet = async () => {
-            const r = await sheet(win, { title: 'Impostazioni Calendario', ok: 'Salva', fields: [
-                { type: 'select', name: 'monday', label: 'La settimana inizia di', value: P.monday ? '1' : '0', options: [['1', 'Lunedì'], ['0', 'Domenica']] },
-                { type: 'checkbox', name: 'weekends', label: 'Evidenzia i fine settimana', value: P.weekends },
-            ] });
-            if (r) { P = { monday: r.monday === '1', weekends: r.weekends }; savePrefs('calendar', P); draw(); }
-        };
-        draw();
-        return {
-            prefs: prefsSheet,
-            context: () => [['Vai a oggi', today], ['Mese precedente', () => move(-1)], ['Mese successivo', () => move(1)], '-', ['Impostazioni Calendario…', prefsSheet]],
-            menus: () => ({
-                Vista: [['Vai a oggi', today, '⌘T'], '-', ['Mese precedente', () => move(-1), '⌘←'], ['Mese successivo', () => move(1), '⌘→'], ['Anno precedente', () => move(-12)], ['Anno successivo', () => move(12)], '-',
-                    [check(P.monday, 'Settimana da lunedì'), () => setPref('monday', !P.monday)],
-                    [check(P.weekends, 'Evidenzia fine settimana'), () => setPref('weekends', !P.weekends)]],
-            }),
-        };
-    }
 
     /* ---------- Impostazioni (stile Impostazioni di Sistema: barra laterale + pannelli) ---------- */
     function settings(body, win) {
@@ -1548,6 +1625,504 @@
 
 
 
+
+    /* ---------- Colori condivisi da Promemoria e Calendario ---------- */
+    const PALETTE = { red: '#ff3b30', orange: '#ff9500', yellow: '#ffcc00', green: '#34c759', blue: '#0a84ff', purple: '#af52de', pink: '#ff2d55', brown: '#a2845e', gray: '#8e8e93' };
+    const colorOpts = Object.keys(PALETTE).map(k => [k, { red: 'Rosso', orange: 'Arancione', yellow: 'Giallo', green: 'Verde', blue: 'Blu', purple: 'Viola', pink: 'Rosa', brown: 'Marrone', gray: 'Grigio' }[k]]);
+    const pad2 = n => String(n).padStart(2, '0');
+    const isoLocal = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    const isoDate = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    const startOfDay = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+    const fmtTime = d => d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+
+    /* ---------- Avvisi: promemoria in scadenza ed eventi con avviso ---------- */
+    (() => {
+        let last = new Date(Date.now() - 60e3);
+        const fired = new Set(store.get('alerts.fired', []));
+        async function poll() {
+            const to = new Date(Date.now() + 35e3);
+            let list; try { list = await api('GET', `/alerts?from=${encodeURIComponent(last.toISOString())}&to=${encodeURIComponent(to.toISOString())}`); } catch { return; }
+            last = to;
+            list.forEach(a => {
+                if (fired.has(a.key)) return;
+                fired.add(a.key); store.set('alerts.fired', [...fired].slice(-300));
+                setTimeout(() => toast(a.text, { app: a.app }), Math.max(0, new Date(a.at) - Date.now()));
+            });
+        }
+        setTimeout(poll, 4000); setInterval(poll, 30000);
+    })();
+
+    /* ---------- TextEdit ---------- */
+    let teSeq = 0;
+    function openTextEdit(path) {
+        // Ogni documento ha la sua finestra; se il file è già aperto, si porta in primo piano
+        const existing = Object.entries(APPS).find(([, a]) => a.tePath && a.tePath === path);
+        if (existing) return open(existing[0]);
+        const id = 'te-' + (++teSeq);
+        APPS[id] = { name: path ? path.split('/').pop() : 'Senza titolo', icon: 'textedit', hidden: true, w: 760, h: 560, tePath: path, render: (b, w) => textEditor(b, w, path, id) };
+        open(id);
+    }
+    function textEditor(body, win, path, id = 'textedit') {
+        let saved = '', dirty = false, mode = 'edit';
+        let P = prefs('textedit', { size: 14, mono: false, wrap: true });
+        const isMd = () => /\.(md|markdown)$/i.test(path || '');
+        body.innerHTML = `<div class="te">
+            <div class="te-bar"><span class="te-name"></span><span class="seg te-mode" hidden><button data-mode="edit">Testo</button><button data-mode="split">Affiancato</button><button data-mode="preview">Anteprima</button></span>
+                <button class="btn" data-te="save">Salva</button></div>
+            <div class="te-body"><textarea spellcheck="true" aria-label="Testo del documento"></textarea><div class="te-prev as-md"></div></div>
+            <div class="te-status"></div></div>`;
+        const ta = $('textarea', body), prev = $('.te-prev', body), status = $('.te-status', body);
+        const title = () => (path ? path.split('/').pop() : 'Senza titolo');
+        function chrome() {
+            $('.te-name', body).textContent = (dirty ? '● ' : '') + title() + (path ? `  —  ${path.split('/').slice(0, -1).join('/') || 'I miei file'}` : '');
+            $('.titlebar .title', win).textContent = (dirty ? '● ' : '') + title();
+            $('.te-mode', body).hidden = !isMd();
+            body.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+            body.querySelector('.te-body').className = 'te-body m-' + (isMd() ? mode : 'edit');
+            ta.style.fontSize = P.size + 'px'; ta.style.fontFamily = P.mono ? 'ui-monospace, Menlo, monospace' : ''; ta.style.whiteSpace = P.wrap ? 'pre-wrap' : 'pre';
+            const words = (ta.value.match(/\S+/g) || []).length;
+            status.textContent = `${words} parole · ${ta.value.length} caratteri`;
+            if (isMd() && mode !== 'edit') prev.innerHTML = md(ta.value);
+        }
+        async function load() {
+            if (!path) { chrome(); ta.focus(); return; }
+            try {
+                const r = await fetch('/files/text?full=1&path=' + encodeURIComponent(path), { credentials: 'same-origin' });
+                if (!r.ok) throw new Error(r.status === 422 ? 'Il file è troppo grande per TextEdit (massimo 5 MB).' : 'Impossibile aprire il file.');
+                saved = ta.value = await r.text();
+                if (isMd()) mode = 'split';
+            } catch (e) { toast(e.message, { app: 'TextEdit' }); }
+            dirty = false; chrome(); ta.focus();
+        }
+        async function save(asNew = false) {
+            let target = path;
+            if (!target || asNew) {
+                const r = await sheet(win, { title: asNew ? 'Salva con nome' : 'Salva documento', ok: 'Salva', text: 'Percorso nei tuoi file, ad esempio «Scrivania/Appunti.txt» o «Lavoro/note.md».',
+                    fields: [{ name: 'path', label: 'Percorso', value: target || 'Scrivania/Senza titolo.txt' }] });
+                if (!r) return false;
+                target = r.path.trim().replace(/^\/+/, '');
+                if (!/\.[a-z0-9]{1,8}$/i.test(target)) target += '.txt';
+            }
+            try {
+                await api('POST', '/files/save', { path: target, content: ta.value });
+                path = target; APPS[id].tePath = path; APPS[id].name = title(); saved = ta.value; dirty = false; chrome(); renderMenubar();
+                filesChanged(); toast(`Salvato «${title()}»`, { app: 'TextEdit', silent: true });
+                return true;
+            } catch (e) { toast(e.message, { app: 'TextEdit' }); return false; }
+        }
+        ta.addEventListener('input', () => { dirty = ta.value !== saved; chrome(); });
+        ta.addEventListener('keydown', e => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(e.shiftKey); }
+            if (e.key === 'Tab') { e.preventDefault(); const s0 = ta.selectionStart; ta.setRangeText('    ', s0, ta.selectionEnd, 'end'); ta.dispatchEvent(new Event('input')); }
+        });
+        body.addEventListener('click', e => {
+            const m = e.target.closest('[data-mode]'); if (m) { mode = m.dataset.mode; chrome(); }
+            if (e.target.closest('[data-te=save]')) save();
+        });
+        const setPref = (k, v) => { P = { ...P, [k]: v }; savePrefs('textedit', P); chrome(); };
+        load();
+        return {
+            confirmClose: async () => {
+                if (!dirty) return true;
+                const r = await sheet(win, { title: `Salvare le modifiche a «${title()}»?`, text: 'Se non salvi, le modifiche andranno perse.', ok: 'Salva', extra: { label: 'Non salvare', danger: true } });
+                if (!r) return false;
+                if (r.__extra) return true;
+                return save();
+            },
+            menus: () => ({
+                File: [['Nuovo documento', () => openTextEdit(null), '⌘N'], ['Apri dal Finder…', () => { open('finder'); toast('Fai doppio clic su un file di testo per aprirlo in TextEdit', { app: 'TextEdit', silent: true }); }], '-',
+                    ['Salva', () => save(), '⌘S'], ['Salva con nome…', () => save(true), '⇧⌘S'], '-', ['Chiudi', () => close(id), '⌘W']],
+                Formato: [[check(P.mono, 'Carattere monospaziato'), () => setPref('mono', !P.mono)], [check(P.wrap, 'A capo automatico'), () => setPref('wrap', !P.wrap)], '-',
+                    ['Ingrandisci testo', () => setPref('size', Math.min(28, P.size + 1)), '⌘+'], ['Riduci testo', () => setPref('size', Math.max(10, P.size - 1)), '⌘−']],
+                ...(isMd() ? { Vista: [['edit', 'Solo testo'], ['split', 'Testo e anteprima'], ['preview', 'Solo anteprima']].map(([k, l]) => [check(mode === k, l), () => { mode = k; chrome(); }]) } : {}),
+            }),
+        };
+    }
+
+    /* ---------- Promemoria ---------- */
+    function reminders(body, win) {
+        let lists = [], items = [], view = store.get('reminders.view', 'today'), showDone = false;
+        const today = () => startOfDay(new Date());
+        const isOverdue = r => r.due_at && !r.done_at && (r.has_time ? new Date(r.due_at) < new Date() : startOfDay(new Date(r.due_at)) < today());
+        const SMART = {
+            today: ['Oggi', '#0a84ff', r => !r.done_at && r.due_at && startOfDay(new Date(r.due_at)) <= today()],
+            scheduled: ['Programmati', '#ff3b30', r => !r.done_at && r.due_at],
+            all: ['Tutti', '#3a3a3c', r => !r.done_at],
+            flagged: ['Con bandiera', '#ff9500', r => !r.done_at && r.flagged],
+            done: ['Completati', '#8e8e93', r => !!r.done_at],
+        };
+        async function load() {
+            try { const d = await api('GET', '/reminders'); lists = d.lists; items = d.items; } catch (e) { return toast(e.message, { app: 'Promemoria' }); }
+            if (!SMART[view] && !lists.some(l => 'l' + l.id === view)) view = 'today';
+            draw();
+        }
+        const curList = () => lists.find(l => 'l' + l.id === view);
+        function visible() {
+            if (SMART[view]) return items.filter(SMART[view][2]).sort((a, b) => (a.due_at || '9').localeCompare(b.due_at || '9'));
+            const l = curList(); return items.filter(r => r.reminder_list_id === l?.id && (showDone || !r.done_at));
+        }
+        function dueText(r) {
+            if (!r.due_at) return '';
+            const d = new Date(r.due_at), t = today(), diff = Math.round((startOfDay(d) - t) / 864e5);
+            const day = diff === 0 ? 'Oggi' : diff === 1 ? 'Domani' : diff === -1 ? 'Ieri' : d.toLocaleDateString('it-IT', { weekday: diff > 1 && diff < 7 ? 'long' : undefined, day: 'numeric', month: 'short' });
+            return day + (r.has_time ? ', ' + fmtTime(d) : '');
+        }
+        function draw() {
+            const count = f => items.filter(f).length;
+            const title = SMART[view] ? SMART[view][0] : curList()?.name;
+            const color = SMART[view] ? SMART[view][1] : PALETTE[curList()?.color] || '#0a84ff';
+            const list = visible();
+            body.innerHTML = `<div class="rm">
+                <aside class="sidebar rm-side">
+                    <div class="rm-tiles">${Object.entries(SMART).filter(([k]) => k !== 'done').map(([k, [l, c, f]]) => `<button class="rm-tile ${view === k ? 'on' : ''}" data-view="${k}"><i style="background:${c}"></i><b>${count(f)}</b><span>${l}</span></button>`).join('')}</div>
+                    <button class="rm-done-link ${view === 'done' ? 'active' : ''}" data-view="done">Completati</button>
+                    <h4>Le mie liste</h4>
+                    ${lists.map(l => `<button class="${view === 'l' + l.id ? 'active' : ''}" data-view="l${l.id}" data-list="${l.id}"><i class="rm-dot" style="background:${PALETTE[l.color]}"></i>${esc(l.name)}<small>${items.filter(r => r.reminder_list_id === l.id && !r.done_at).length || ''}</small></button>`).join('')}
+                    <button class="rm-add-list" data-act="add-list">＋ Aggiungi lista</button>
+                </aside>
+                <div class="rm-main">
+                    <div class="rm-head"><h2 style="color:${color}">${esc(title || '')}</h2><b style="color:${color}">${list.filter(r => !r.done_at).length}</b></div>
+                    ${!SMART[view] ? `<button class="rm-toggle" data-act="toggle-done">${showDone ? 'Nascondi completati' : 'Mostra completati'}</button>` : ''}
+                    <div class="rm-list">${list.map(r => {
+                        const l = lists.find(x => x.id === r.reminder_list_id);
+                        return `<div class="rm-item ${r.done_at ? 'done' : ''}" data-id="${r.id}">
+                            <button class="rm-check" data-act="toggle" style="--c:${PALETTE[l?.color] || '#0a84ff'}" aria-label="Completato"></button>
+                            <div class="rm-text"><input value="${esc(r.title)}" data-act="title" aria-label="Titolo">${'!'.repeat(r.priority) ? `<em class="rm-prio">${'!'.repeat(r.priority)}</em>` : ''}
+                                <div class="rm-meta">${r.due_at ? `<span class="${isOverdue(r) ? 'late' : ''}">${dueText(r)}</span>` : ''}${SMART[view] && l ? `<span>${esc(l.name)}</span>` : ''}${r.notes ? `<span class="rm-notes">${esc(r.notes.split('\n')[0])}</span>` : ''}</div></div>
+                            ${r.flagged ? '<span class="rm-flag">⚑</span>' : ''}<button class="rm-info" data-act="info" aria-label="Dettagli">ⓘ</button></div>`;
+                    }).join('') || `<p class="rm-empty">${view === 'today' ? 'Nessun promemoria per oggi 🎉' : 'Nessun promemoria'}</p>`}</div>
+                    ${view !== 'done' ? `<button class="rm-new" data-act="new">＋ Nuovo promemoria</button>` : ''}
+                </div></div>`;
+        }
+        const itemOf = el => items.find(r => r.id === +el.closest('[data-id]').dataset.id);
+        async function patch(r, data) {
+            try { Object.assign(r, await api('PUT', `/reminders/${r.id}`, data)); } catch (e) { toast(e.message, { app: 'Promemoria' }); }
+        }
+        async function create() {
+            const l = curList() || lists[0];
+            const due = view === 'today' ? isoDate(new Date()) + 'T09:00:00' : null;
+            try { const r = await api('POST', '/reminders', { reminder_list_id: l.id, title: 'Nuovo promemoria', due_at: due, has_time: false, flagged: view === 'flagged' }); items.push(r); draw();
+                const inp = body.querySelector(`[data-id="${r.id}"] input`); inp?.focus(); inp?.select(); } catch (e) { toast(e.message, { app: 'Promemoria' }); }
+        }
+        async function info(r) {
+            const d = r.due_at ? new Date(r.due_at) : null;
+            const res = await sheet(win, { title: 'Dettagli', ok: 'Salva', extra: { label: 'Elimina', danger: true }, fields: [
+                { name: 'title', label: 'Titolo', value: r.title }, { type: 'textarea', name: 'notes', label: 'Note', value: r.notes || '' },
+                { type: 'date', name: 'date', label: 'Data', value: d ? isoDate(d) : '' }, { type: 'time', name: 'time', label: 'Ora (facoltativa)', value: d && r.has_time ? fmtTime(d) : '' },
+                { type: 'select', name: 'priority', label: 'Priorità', value: r.priority, options: [[0, 'Nessuna'], [1, 'Bassa'], [2, 'Media'], [3, 'Alta']] },
+                { type: 'select', name: 'list', label: 'Lista', value: r.reminder_list_id, options: lists.map(l => [l.id, l.name]) },
+                { type: 'checkbox', name: 'flagged', label: 'Con bandiera', value: r.flagged },
+            ] });
+            if (!res) return;
+            if (res.__extra) { try { await api('DELETE', `/reminders/${r.id}`); items = items.filter(x => x !== r); playSound('trash'); draw(); } catch (e) { toast(e.message); } return; }
+            const due = res.date ? new Date(`${res.date}T${res.time || '09:00'}`) : null;
+            await patch(r, { title: res.title || r.title, notes: res.notes || null, due_at: due ? due.toISOString() : null, has_time: !!(res.date && res.time), priority: +res.priority, reminder_list_id: +res.list, flagged: res.flagged });
+            draw();
+        }
+        body.addEventListener('click', async e => {
+            const v = e.target.closest('[data-view]'); if (v) { view = v.dataset.view; store.set('reminders.view', view); showDone = false; return draw(); }
+            const a = e.target.closest('[data-act]')?.dataset.act;
+            if (a === 'new') return create();
+            if (a === 'toggle-done') { showDone = !showDone; return draw(); }
+            if (a === 'add-list') {
+                const r = await sheet(win, { title: 'Nuova lista', ok: 'Crea', fields: [{ name: 'name', label: 'Nome', value: 'Nuova lista' }, { type: 'select', name: 'color', label: 'Colore', value: 'blue', options: colorOpts }] });
+                if (r) try { const l = await api('POST', '/reminder-lists', r); lists.push(l); view = 'l' + l.id; draw(); } catch (err) { toast(err.message); }
+                return;
+            }
+            if (a === 'toggle') {
+                const r = itemOf(e.target); const el = e.target.closest('.rm-item');
+                el.classList.toggle('done', !r.done_at);
+                await patch(r, { done: !r.done_at });
+                if (r.done_at) playSound('gocce');
+                setTimeout(draw, r.done_at ? 600 : 0);
+            }
+            if (a === 'info') info(itemOf(e.target));
+        });
+        body.addEventListener('change', e => { if (e.target.dataset.act === 'title') { const r = itemOf(e.target); const t = e.target.value.trim(); if (t && t !== r.title) patch(r, { title: t }); } });
+        body.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset.act === 'title') { e.target.blur(); create(); } });
+        load();
+        return {
+            context: e => {
+                const it = e.target.closest('[data-id]');
+                if (it) { const r = itemOf(it); return [[r.done_at ? 'Segna come da fare' : 'Segna come completato', async () => { await patch(r, { done: !r.done_at }); draw(); }],
+                    [r.flagged ? 'Togli bandiera' : 'Aggiungi bandiera', async () => { await patch(r, { flagged: !r.flagged }); draw(); }], ['Dettagli…', () => info(r)], '-',
+                    ['Elimina', async () => { await api('DELETE', `/reminders/${r.id}`); items = items.filter(x => x !== r); playSound('trash'); draw(); }]]; }
+                const li = e.target.closest('[data-list]');
+                if (li) { const l = lists.find(x => x.id === +li.dataset.list); return [
+                    ['Rinomina…', async () => { const r = await sheet(win, { title: 'Modifica lista', ok: 'Salva', fields: [{ name: 'name', label: 'Nome', value: l.name }, { type: 'select', name: 'color', label: 'Colore', value: l.color, options: colorOpts }] }); if (r) { Object.assign(l, await api('PUT', `/reminder-lists/${l.id}`, r)); draw(); } }],
+                    ['Elimina lista…', async () => { const ok = await sheet(win, { title: `Eliminare «${l.name}»?`, text: 'Verranno eliminati anche i suoi promemoria.', ok: 'Elimina', danger: true }); if (ok) try { await api('DELETE', `/reminder-lists/${l.id}`); load(); } catch (err) { toast(err.message); } }]]; }
+                return [['Nuovo promemoria', create]];
+            },
+            menus: () => ({ File: [['Nuovo promemoria', create, '⌘N'], ['Nuova lista…', () => body.querySelector('[data-act=add-list]').click()], '-', ['Chiudi finestra', () => close('reminders'), '⌘W']],
+                Vista: Object.entries(SMART).map(([k, [l]]) => [check(view === k, l), () => { view = k; draw(); }]) }),
+        };
+    }
+
+    /* ---------- Calendario ---------- */
+    function calendar(body, win) {
+        let cals = [], events = [], mode = store.get('calendar.mode', 'month'), cursor = startOfDay(new Date());
+        const HOUR = 46;
+        const weekStart = d => { const x = startOfDay(d); x.setDate(x.getDate() - (x.getDay() + 6) % 7); return x; };
+        function range() {
+            if (mode === 'day') { const a = startOfDay(cursor), b = new Date(a); b.setDate(b.getDate() + 1); return [a, b]; }
+            if (mode === 'week') { const a = weekStart(cursor), b = new Date(a); b.setDate(b.getDate() + 7); return [a, b]; }
+            const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1), a = weekStart(first), b = new Date(a); b.setDate(b.getDate() + 42); return [a, b];
+        }
+        async function load() {
+            try {
+                if (!cals.length) cals = await api('GET', '/calendars');
+                const [a, b] = range();
+                events = (await api('GET', `/events?from=${encodeURIComponent(a.toISOString())}&to=${encodeURIComponent(b.toISOString())}`)).filter(o => cals.find(c => c.id === o.calendar_id)?.visible !== false);
+            } catch (e) { toast(e.message, { app: 'Calendario' }); }
+            draw();
+        }
+        const colorOf = o => PALETTE[cals.find(c => c.id === o.calendar_id)?.color] || '#0a84ff';
+        const evOn = day => events.filter(o => { const s = new Date(o.start), e = new Date(o.end); const d0 = startOfDay(day), d1 = new Date(d0); d1.setDate(d1.getDate() + 1); return s < d1 && (e > d0 || (o.all_day && sameDay(s, d0))); });
+        function title() {
+            if (mode === 'day') return cursor.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+            if (mode === 'week') { const [a] = range(), b = new Date(a); b.setDate(b.getDate() + 6); return `${a.getDate()} ${a.getMonth() !== b.getMonth() ? a.toLocaleDateString('it-IT', { month: 'short' }) + ' ' : ''}– ${b.getDate()} ${b.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}`; }
+            return cursor.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+        }
+        function monthView() {
+            const [a] = range(), now = new Date();
+            let h = `<div class="cm">${['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'].map(d => `<div class="cm-dow">${d}</div>`).join('')}`;
+            for (let i = 0; i < 42; i++) {
+                const d = new Date(a); d.setDate(a.getDate() + i);
+                const list = evOn(d), other = d.getMonth() !== cursor.getMonth();
+                h += `<div class="cm-day ${other ? 'other' : ''} ${sameDay(d, now) ? 'today' : ''}" data-day="${isoDate(d)}"><span class="cm-n">${d.getDate()}</span>
+                    ${list.slice(0, 3).map(o => `<div class="cm-ev ${o.all_day ? 'allday' : ''}" data-ev="${o.id}" data-start="${o.start}" style="--c:${colorOf(o)}">${o.all_day ? '' : `<i></i>${fmtTime(new Date(o.start))} `}${esc(o.title)}</div>`).join('')}
+                    ${list.length > 3 ? `<div class="cm-more">+${list.length - 3} altri</div>` : ''}</div>`;
+            }
+            return h + '</div>';
+        }
+        function timeView(days) {
+            const now = new Date();
+            const cols = days.map(d => {
+                const list = evOn(d).filter(o => !o.all_day);
+                // eventi sovrapposti: affiancati in colonne
+                const placed = []; list.sort((x, y) => x.start.localeCompare(y.start)).forEach(o => {
+                    const s = new Date(o.start), e = new Date(o.end); let col = 0;
+                    while (placed.some(p => p.col === col && p.s < e && p.e > s)) col++;
+                    placed.push({ o, s, e, col });
+                });
+                const width = Math.max(1, ...placed.map(p => p.col + 1));
+                const d0 = startOfDay(d);
+                return `<div class="ct-col ${sameDay(d, now) ? 'today' : ''}" data-day="${isoDate(d)}">${placed.map(({ o, s, e, col }) => {
+                    const top = Math.max(0, (s - d0) / 36e5) * HOUR, height = Math.max(20, ((Math.min(e, new Date(d0.getTime() + 864e5)) - Math.max(s, d0)) / 36e5) * HOUR);
+                    return `<div class="ct-ev" data-ev="${o.id}" data-start="${o.start}" style="--c:${colorOf(o)};top:${top}px;height:${height - 2}px;left:${col / width * 100}%;width:${100 / width}%"><b>${esc(o.title)}</b><span>${fmtTime(s)}${o.location ? ' · ' + esc(o.location) : ''}</span></div>`;
+                }).join('')}${sameDay(d, now) ? `<div class="ct-now" style="top:${(now - d0) / 36e5 * HOUR}px"></div>` : ''}</div>`;
+            });
+            const allDay = days.map(d => `<div class="ct-allday-cell" data-day="${isoDate(d)}">${evOn(d).filter(o => o.all_day).map(o => `<div class="cm-ev allday" data-ev="${o.id}" data-start="${o.start}" style="--c:${colorOf(o)}">${esc(o.title)}</div>`).join('')}</div>`).join('');
+            return `<div class="ct" style="--days:${days.length}">
+                <div class="ct-head"><div></div>${days.map(d => `<div class="${sameDay(d, now) ? 'today' : ''}"><span>${d.toLocaleDateString('it-IT', { weekday: 'short' })}</span><b>${d.getDate()}</b></div>`).join('')}</div>
+                <div class="ct-allday"><div>tutto il giorno</div>${allDay}</div>
+                <div class="ct-scroll"><div class="ct-grid"><div class="ct-hours">${[...Array(24).keys()].map(h => `<div style="height:${HOUR}px"><span>${h ? pad2(h) + ':00' : ''}</span></div>`).join('')}</div>${cols.join('')}</div></div></div>`;
+        }
+        function draw() {
+            const [a] = range();
+            const days = mode === 'day' ? [startOfDay(cursor)] : mode === 'week' ? [...Array(7).keys()].map(i => { const d = new Date(a); d.setDate(a.getDate() + i); return d; }) : null;
+            body.innerHTML = `<div class="cal2">
+                <aside class="sidebar cal2-side"><h4>Calendari</h4>${cals.map(c => `<label class="cal2-cal" data-cal="${c.id}"><input type="checkbox" ${c.visible ? 'checked' : ''} data-calvis="${c.id}" style="accent-color:${PALETTE[c.color]}"><span>${esc(c.name)}</span></label>`).join('')}
+                    <button class="rm-add-list" data-cact="add-cal">＋ Nuovo calendario</button></aside>
+                <div class="cal2-main">
+                    <div class="cal2-bar"><h2>${esc(title())}</h2>
+                        <div class="seg">${[['day', 'Giorno'], ['week', 'Settimana'], ['month', 'Mese']].map(([k, l]) => `<button class="${mode === k ? 'on' : ''}" data-mode="${k}">${l}</button>`).join('')}</div>
+                        <div class="cal2-nav"><button class="btn" data-nav="-1" aria-label="Precedente">‹</button><button class="btn" data-nav="0">Oggi</button><button class="btn" data-nav="1" aria-label="Successivo">›</button></div>
+                        <button class="btn primary" data-cact="new">＋</button></div>
+                    <div class="cal2-view">${mode === 'month' ? monthView() : timeView(days)}</div></div></div>`;
+            const sc = $('.ct-scroll', body); if (sc) sc.scrollTop = 7 * HOUR;
+        }
+        function move(n) {
+            if (n === 0) cursor = startOfDay(new Date());
+            else if (mode === 'day') cursor.setDate(cursor.getDate() + n);
+            else if (mode === 'week') cursor.setDate(cursor.getDate() + 7 * n);
+            else cursor = new Date(cursor.getFullYear(), cursor.getMonth() + n, 1);
+            load();
+        }
+        const ALERTS = [['', 'Nessun avviso'], ['0', 'All\'inizio'], ['5', '5 minuti prima'], ['15', '15 minuti prima'], ['30', '30 minuti prima'], ['60', '1 ora prima'], ['1440', '1 giorno prima']];
+        async function editor(o, start) {
+            const isNew = !o;
+            const s = o ? new Date(o.series_start) : start || (() => { const d = new Date(cursor); d.setHours(new Date().getHours() + 1, 0, 0, 0); return d; })();
+            const e = o ? new Date(new Date(o.series_start).getTime() + (new Date(o.end) - new Date(o.start))) : new Date(s.getTime() + 36e5);
+            const r = await sheet(win, { title: isNew ? 'Nuovo evento' : 'Modifica evento', ok: isNew ? 'Aggiungi' : 'Salva', extra: isNew ? null : { label: 'Elimina', danger: true }, fields: [
+                { name: 'title', label: 'Titolo', value: o?.title || 'Nuovo evento' }, { name: 'location', label: 'Luogo (facoltativo)', value: o?.location || '' },
+                { type: 'select', name: 'calendar_id', label: 'Calendario', value: o?.calendar_id || cals.find(c => c.visible)?.id || cals[0]?.id, options: cals.map(c => [c.id, c.name]) },
+                { type: 'checkbox', name: 'all_day', label: 'Tutto il giorno', value: o?.all_day || false },
+                { type: 'datetime-local', name: 'starts_at', label: 'Inizio', value: isoLocal(s) }, { type: 'datetime-local', name: 'ends_at', label: 'Fine', value: isoLocal(e) },
+                { type: 'select', name: 'repeat', label: 'Ripeti', value: o?.repeat || 'none', options: [['none', 'Mai'], ['daily', 'Ogni giorno'], ['weekly', 'Ogni settimana'], ['monthly', 'Ogni mese'], ['yearly', 'Ogni anno']] },
+                { type: 'date', name: 'repeat_until', label: 'Fine ripetizione', value: o?.repeat_until || '' },
+                { type: 'select', name: 'alert_minutes', label: 'Avviso', value: o?.alert_minutes ?? '', options: ALERTS },
+                { type: 'textarea', name: 'notes', label: 'Note', value: o?.notes || '' },
+            ] });
+            if (!r) return;
+            try {
+                if (r.__extra) {
+                    const ok = await sheet(win, { title: `Eliminare «${o.title}»?`, text: o.repeat !== 'none' ? 'Verranno eliminate tutte le ripetizioni.' : '', ok: 'Elimina', danger: true });
+                    if (!ok) return; await api('DELETE', `/events/${o.id}`); playSound('trash'); return load();
+                }
+                let st = new Date(r.starts_at), en = new Date(r.ends_at);
+                if (r.all_day) { st = startOfDay(st); en = startOfDay(en); en.setHours(23, 59, 0, 0); }
+                if (en < st) en = new Date(st.getTime() + 36e5);
+                const data = { title: r.title || 'Nuovo evento', location: r.location || null, calendar_id: +r.calendar_id, all_day: r.all_day, starts_at: st.toISOString(), ends_at: en.toISOString(),
+                    repeat: r.repeat, repeat_until: r.repeat !== 'none' && r.repeat_until ? r.repeat_until : null, alert_minutes: r.alert_minutes === '' ? null : +r.alert_minutes, notes: r.notes || null };
+                isNew ? await api('POST', '/events', data) : await api('PUT', `/events/${o.id}`, data);
+                load();
+            } catch (err) { toast(err.message, { app: 'Calendario' }); }
+        }
+        const occOf = el => events.find(o => o.id === +el.dataset.ev && o.start === el.dataset.start);
+        body.addEventListener('click', async e => {
+            const m = e.target.closest('[data-mode]'); if (m) { mode = m.dataset.mode; store.set('calendar.mode', mode); return load(); }
+            const n = e.target.closest('[data-nav]'); if (n) return move(+n.dataset.nav);
+            const ev = e.target.closest('[data-ev]'); if (ev) return editor(occOf(ev));
+            const ca = e.target.closest('[data-cact]')?.dataset.cact;
+            if (ca === 'new') return editor(null);
+            if (ca === 'add-cal') {
+                const r = await sheet(win, { title: 'Nuovo calendario', ok: 'Crea', fields: [{ name: 'name', label: 'Nome', value: 'Nuovo calendario' }, { type: 'select', name: 'color', label: 'Colore', value: 'green', options: colorOpts }] });
+                if (r) try { cals.push(await api('POST', '/calendars', r)); load(); } catch (err) { toast(err.message); }
+                return;
+            }
+            const more = e.target.closest('.cm-more'); if (more) { cursor = new Date(more.closest('[data-day]').dataset.day + 'T00:00'); mode = 'day'; return load(); }
+        });
+        body.addEventListener('dblclick', e => {
+            if (e.target.closest('[data-ev]')) return;
+            const col = e.target.closest('.ct-col'), day = e.target.closest('[data-day]');
+            if (col) { const y = e.clientY - col.getBoundingClientRect().top; const d = new Date(col.dataset.day + 'T00:00'); d.setMinutes(Math.floor(y / HOUR * 2) * 30); return editor(null, d); }
+            if (day) { const d = new Date(day.dataset.day + 'T09:00'); return editor(null, d); }
+        });
+        body.addEventListener('change', async e => {
+            const v = e.target.dataset.calvis; if (!v) return;
+            const c = cals.find(x => x.id === +v); c.visible = e.target.checked;
+            try { await api('PUT', `/calendars/${c.id}`, { visible: c.visible }); } catch {}
+            load();
+        });
+        load();
+        return {
+            context: e => {
+                const ev = e.target.closest('[data-ev]');
+                if (ev) { const o = occOf(ev); return [['Modifica…', () => editor(o)], '-', ['Elimina…', async () => { const ok = await sheet(win, { title: `Eliminare «${o.title}»?`, ok: 'Elimina', danger: true }); if (ok) { await api('DELETE', `/events/${o.id}`); playSound('trash'); load(); } }]]; }
+                const cl = e.target.closest('[data-cal]');
+                if (cl) { const c = cals.find(x => x.id === +cl.dataset.cal); return [
+                    ['Modifica…', async () => { const r = await sheet(win, { title: 'Modifica calendario', ok: 'Salva', fields: [{ name: 'name', label: 'Nome', value: c.name }, { type: 'select', name: 'color', label: 'Colore', value: c.color, options: colorOpts }] }); if (r) { Object.assign(c, await api('PUT', `/calendars/${c.id}`, r)); load(); } }],
+                    ['Elimina calendario…', async () => { const ok = await sheet(win, { title: `Eliminare «${c.name}»?`, text: 'Verranno eliminati anche i suoi eventi.', ok: 'Elimina', danger: true }); if (ok) try { await api('DELETE', `/calendars/${c.id}`); cals = cals.filter(x => x !== c); load(); } catch (err) { toast(err.message); } }]]; }
+                return [['Nuovo evento', () => editor(null)], ['Vai a oggi', () => move(0)]];
+            },
+            menus: () => ({
+                File: [['Nuovo evento', () => editor(null), '⌘N'], ['Nuovo calendario…', () => body.querySelector('[data-cact=add-cal]').click()], '-', ['Chiudi finestra', () => close('calendar'), '⌘W']],
+                Vista: [...[['day', 'Giorno'], ['week', 'Settimana'], ['month', 'Mese']].map(([k, l]) => [check(mode === k, l), () => { mode = k; store.set('calendar.mode', k); load(); }]), '-',
+                    ['Vai a oggi', () => move(0), '⌘T'], ['Precedente', () => move(-1), '⌘←'], ['Successivo', () => move(1), '⌘→']],
+            }),
+        };
+    }
+
+    /* ---------- Contatti ---------- */
+    function contacts(body, win) {
+        let list = [], sel = null, query = '', group = 'all', editing = false;
+        const LABELS = [['cellulare', 'cellulare'], ['casa', 'casa'], ['lavoro', 'lavoro'], ['altro', 'altro']];
+        const nameOf = c => [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company || 'Senza nome';
+        const sortKey = c => (c.last_name || c.first_name || c.company || '').toLocaleUpperCase('it');
+        const initials = c => (((c.first_name || '')[0] || '') + ((c.last_name || '')[0] || '') || (c.company || '?')[0]).toUpperCase();
+        const avatar = (c, big) => c.photo ? `<span class="ct-av ${big ? 'big' : ''}"><img src="/contacts/${c.id}/photo?v=${encodeURIComponent(c.photo)}" alt=""></span>` : `<span class="ct-av ${big ? 'big' : ''}">${esc(initials(c))}</span>`;
+        async function load(keepSel = true) {
+            try { list = await api('GET', '/contacts'); } catch (e) { return toast(e.message, { app: 'Contatti' }); }
+            list.sort((a, b) => sortKey(a).localeCompare(sortKey(b), 'it'));
+            if (!keepSel || !list.some(c => c.id === sel)) sel = list[0]?.id ?? null;
+            draw();
+        }
+        function filtered() {
+            const q = query.toLowerCase().trim();
+            return list.filter(c => (group !== 'fav' || c.favorite) && (!q || [nameOf(c), c.company, c.job_title, ...(c.emails || []).map(x => x.value), ...(c.phones || []).map(x => x.value)].join(' ').toLowerCase().includes(q)));
+        }
+        function detail(c) {
+            if (!c) return `<div class="ctc-empty">${list.length ? 'Seleziona un contatto' : 'Nessun contatto.<br>Premi ＋ per crearne uno, oppure importa un file vCard (.vcf) da iPhone, Android o Outlook.'}</div>`;
+            if (editing) return form(c);
+            const rows = (arr, kind) => (arr || []).map(x => `<div class="ctc-row"><small>${esc(x.label || kind)}</small>${kind === 'email' ? `<a href="mailto:${esc(x.value)}">${esc(x.value)}</a>` : kind === 'telefono' ? `<a href="tel:${esc(x.value.replace(/\s/g, ''))}">${esc(x.value)}</a>` : `<span>${esc(x.value).replace(/\n/g, '<br>')}</span><a class="ctc-map" href="https://www.openstreetmap.org/search?query=${encodeURIComponent(x.value)}" target="_blank" rel="noopener">Mappa</a>`}</div>`).join('');
+            return `<div class="ctc">
+                <div class="ctc-head">${avatar(c, true)}<h2>${esc(nameOf(c))}${c.favorite ? ' <span class="ctc-fav">★</span>' : ''}</h2><p>${esc([c.job_title, c.company].filter(Boolean).join(' · '))}</p>
+                    <div class="ctc-quick">${c.phones?.[0] ? `<a class="btn" href="tel:${esc(c.phones[0].value.replace(/\s/g, ''))}">Chiama</a>` : ''}${c.emails?.[0] ? `<a class="btn" href="mailto:${esc(c.emails[0].value)}">Email</a>` : ''}</div></div>
+                <div class="ctc-fields">${rows(c.phones, 'telefono')}${rows(c.emails, 'email')}${rows(c.addresses, 'indirizzo')}
+                    ${c.birthday ? `<div class="ctc-row"><small>compleanno</small><span>${new Date(c.birthday + 'T00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: c.birthday.startsWith('1900') ? undefined : 'numeric' })}</span></div>` : ''}
+                    ${c.website ? `<div class="ctc-row"><small>sito web</small><a href="${esc(/^https?:/.test(c.website) ? c.website : 'https://' + c.website)}" target="_blank" rel="noopener">${esc(c.website)}</a></div>` : ''}
+                    ${c.notes ? `<div class="ctc-row"><small>note</small><span>${esc(c.notes).replace(/\n/g, '<br>')}</span></div>` : ''}</div>
+                <div class="ctc-acts"><button class="btn" data-cact="fav">${c.favorite ? 'Togli dai preferiti' : 'Aggiungi ai preferiti'}</button><button class="btn" data-cact="export1">Esporta vCard</button><button class="btn primary" data-cact="edit">Modifica</button></div></div>`;
+        }
+        function form(c) {
+            const multi = (key, label, arr) => `<div class="ctf-multi" data-multi="${key}"><small>${label}</small>${(arr?.length ? arr : [{ label: key === 'phones' ? 'cellulare' : 'lavoro', value: '' }]).map(x => rowHTML(key, x)).join('')}
+                <button type="button" class="ctf-add" data-add="${key}">＋ aggiungi ${label.toLowerCase()}</button></div>`;
+            return `<form class="ctf" id="ctForm">
+                <div class="ctf-photo">${avatar(c, true)}<label class="btn">Foto…<input type="file" accept="image/*" hidden data-photo></label></div>
+                <div class="ctf-grid"><input name="first_name" placeholder="Nome" value="${esc(c.first_name || '')}"><input name="last_name" placeholder="Cognome" value="${esc(c.last_name || '')}">
+                    <input name="company" placeholder="Azienda" value="${esc(c.company || '')}"><input name="job_title" placeholder="Ruolo" value="${esc(c.job_title || '')}"></div>
+                ${multi('phones', 'Telefono', c.phones)}${multi('emails', 'Email', c.emails)}${multi('addresses', 'Indirizzo', c.addresses)}
+                <div class="ctf-grid"><label>Compleanno<input type="date" name="birthday" value="${esc(c.birthday || '')}"></label><label>Sito web<input name="website" value="${esc(c.website || '')}"></label></div>
+                <textarea name="notes" placeholder="Note" rows="3">${esc(c.notes || '')}</textarea>
+                <div class="ctc-acts"><button type="button" class="btn danger" data-cact="delete" style="margin-right:auto">Elimina contatto</button><button type="button" class="btn" data-cact="cancel">Annulla</button><button class="btn primary">Fine</button></div></form>`;
+        }
+        const rowHTML = (key, x) => `<div class="ctf-row"><select data-l>${LABELS.map(([v, l]) => `<option ${x.label === v ? 'selected' : ''}>${l}</option>`).join('')}</select>${key === 'addresses' ? `<textarea data-v rows="2" placeholder="Via, città, CAP, paese">${esc(x.value)}</textarea>` : `<input data-v value="${esc(x.value)}" type="${key === 'emails' ? 'email' : 'text'}">`}<button type="button" class="ctf-del" data-del aria-label="Rimuovi">−</button></div>`;
+        function draw() {
+            const items = filtered(); let letter = '';
+            const c = list.find(x => x.id === sel);
+            body.innerHTML = `<div class="ctapp">
+                <aside class="sidebar ct-side"><button class="${group === 'all' ? 'active' : ''}" data-group="all">Tutti i contatti <small>${list.length}</small></button>
+                    <button class="${group === 'fav' ? 'active' : ''}" data-group="fav">Preferiti <small>${list.filter(x => x.favorite).length}</small></button>
+                    <h4>Importa ed esporta</h4><label class="ct-side-btn">Importa vCard…<input type="file" accept=".vcf,text/vcard" hidden data-import></label><button class="ct-side-btn" data-cact="export">Esporta tutti</button></aside>
+                <div class="ct-list"><div class="ct-search"><input id="ctSearch" type="search" placeholder="Cerca" value="${esc(query)}" autocomplete="off"><button class="btn" data-cact="new" aria-label="Nuovo contatto">＋</button></div>
+                    <div class="ct-items">${items.map(x => { const L = sortKey(x)[0] || '#'; const head = L !== letter ? (letter = L, `<div class="ct-letter">${esc(L)}</div>`) : '';
+                        return head + `<button class="ct-item ${x.id === sel ? 'sel' : ''}" data-cid="${x.id}">${avatar(x)}<span><b>${esc(nameOf(x))}</b>${x.company && (x.first_name || x.last_name) ? `<small>${esc(x.company)}</small>` : ''}</span></button>`; }).join('') || '<p class="rm-empty">Nessun contatto</p>'}</div></div>
+                <div class="ct-detail">${detail(c)}</div></div>`;
+            const s = $('#ctSearch', body);
+            s.oninput = () => { query = s.value; const pos = s.selectionStart; draw(); const n = $('#ctSearch', body); n.focus(); n.setSelectionRange(pos, pos); };
+        }
+        function collect(formEl) {
+            const fd = Object.fromEntries(new FormData(formEl));
+            const multi = key => [...formEl.querySelectorAll(`[data-multi="${key}"] .ctf-row`)].map(r => ({ label: $('[data-l]', r).value, value: $('[data-v]', r).value.trim() })).filter(x => x.value);
+            return { first_name: fd.first_name || null, last_name: fd.last_name || null, company: fd.company || null, job_title: fd.job_title || null, birthday: fd.birthday || null,
+                website: fd.website || null, notes: fd.notes || null, phones: multi('phones'), emails: multi('emails'), addresses: multi('addresses') };
+        }
+        body.addEventListener('click', async e => {
+            const g = e.target.closest('[data-group]'); if (g) { group = g.dataset.group; return draw(); }
+            const it = e.target.closest('[data-cid]'); if (it) { sel = +it.dataset.cid; editing = false; return draw(); }
+            const add = e.target.closest('[data-add]'); if (add) { add.insertAdjacentHTML('beforebegin', rowHTML(add.dataset.add, { label: 'altro', value: '' })); return; }
+            const del = e.target.closest('[data-del]'); if (del) { del.closest('.ctf-row').remove(); return; }
+            const a = e.target.closest('[data-cact]')?.dataset.cact; const c = list.find(x => x.id === sel);
+            if (a === 'new') { try { const n = await api('POST', '/contacts', { first_name: '', last_name: '' }); list.push(n); sel = n.id; editing = true; draw(); $('#ctForm input[name=first_name]', body)?.focus(); } catch (err) { toast(err.message); } }
+            if (a === 'edit') { editing = true; draw(); }
+            if (a === 'cancel') {
+                editing = false;
+                // Un contatto appena creato e lasciato vuoto non va conservato
+                const empty = c && !c.first_name && !c.last_name && !c.company && !c.phones?.length && !c.emails?.length;
+                if (empty) { await api('DELETE', `/contacts/${c.id}`); return load(false); }
+                draw();
+            }
+            if (a === 'fav') { Object.assign(c, await api('PUT', `/contacts/${c.id}`, { favorite: !c.favorite })); draw(); }
+            if (a === 'delete') { const ok = await sheet(win, { title: `Eliminare ${nameOf(c)}?`, ok: 'Elimina', danger: true }); if (ok) { await api('DELETE', `/contacts/${c.id}`); playSound('trash'); editing = false; load(false); } }
+            if (a === 'export') location.href = '/contacts/export';
+            if (a === 'export1') location.href = '/contacts/export?ids=' + c.id;
+        });
+        body.addEventListener('submit', async e => {
+            e.preventDefault(); const c = list.find(x => x.id === sel);
+            try { Object.assign(c, await api('PUT', `/contacts/${c.id}`, collect(e.target))); editing = false; list.sort((a, b) => sortKey(a).localeCompare(sortKey(b), 'it')); draw(); } catch (err) { toast(err.message, { app: 'Contatti' }); }
+        });
+        body.addEventListener('change', async e => {
+            if (e.target.matches('[data-import]')) {
+                const f = e.target.files[0]; if (!f) return;
+                const fd = new FormData(); fd.append('file', f);
+                try { const r = await api('POST', '/contacts/import', fd); toast(`Importati ${r.imported} contatti`, { app: 'Contatti' }); load(false); } catch (err) { toast(err.message, { app: 'Contatti' }); }
+            }
+            if (e.target.matches('[data-photo]')) {
+                const f = e.target.files[0]; if (!f) return; const c = list.find(x => x.id === sel);
+                const fd = new FormData(); fd.append('photo', f);
+                try { Object.assign(c, await api('POST', `/contacts/${c.id}/photo`, fd)); const formEl = $('#ctForm', body); const keep = collect(formEl); Object.assign(c, keep); draw(); } catch (err) { toast(err.message, { app: 'Contatti' }); }
+            }
+        });
+        load();
+        return {
+            context: e => { const it = e.target.closest('[data-cid]'); if (!it) return [['Nuovo contatto', () => body.querySelector('[data-cact=new]').click()]];
+                const c = list.find(x => x.id === +it.dataset.cid); return [['Modifica', () => { sel = c.id; editing = true; draw(); }], [c.favorite ? 'Togli dai preferiti' : 'Aggiungi ai preferiti', async () => { Object.assign(c, await api('PUT', `/contacts/${c.id}`, { favorite: !c.favorite })); draw(); }],
+                    ['Esporta vCard', () => { location.href = '/contacts/export?ids=' + c.id; }], '-', ['Elimina…', async () => { const ok = await sheet(win, { title: `Eliminare ${nameOf(c)}?`, ok: 'Elimina', danger: true }); if (ok) { await api('DELETE', `/contacts/${c.id}`); playSound('trash'); load(false); } }]]; },
+            menus: () => ({ File: [['Nuovo contatto', () => body.querySelector('[data-cact=new]').click(), '⌘N'], ['Importa vCard…', () => body.querySelector('[data-import]').click()], ['Esporta tutti', () => { location.href = '/contacts/export'; }], '-', ['Chiudi finestra', () => close('contacts'), '⌘W']] }),
+        };
+    }
 
     /* ---------- webX: browser a schede dentro MarX ---------- */
     function webx(body, win) {
@@ -2117,8 +2692,7 @@
             }
         } else if (t.closest('.menubar, .dock-wrap, .dropdown, .control, .spotlight')) return;
         else items = [['Nuova nota', () => open('notes')], ['Apri Finder', () => open('finder')], '-',
-            ['Nuova cartella sulla scrivania', async () => { try { await api('POST', '/files/folder', { path: 'Scrivania', name: 'Cartella senza titolo' }); filesChanged(); } catch (e) { toast(e.message); } }],
-            [check(S.desktopStacks, 'Usa pile'), () => { setSetting('desktopStacks', !S.desktopStacks); deskView.draw(); }], '-',
+            ...deskView.menu(), '-',
             ['Cambia sfondo', wallNext], ['Personalizza sfondo…', () => openSettings('sfondo')], [document.documentElement.dataset.theme === 'dark' ? 'Passa a modalità chiara' : 'Passa a modalità scura', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark')], '-',
             ['Impostazioni di sistema…', () => open('settings')], '-', ['Blocca schermo', () => lock()], ['Esci', logout]];
         if (items?.length) contextMenu(e.clientX, e.clientY, items);

@@ -3,6 +3,13 @@
 La versione corrente è in `config/marx.php`.
 Formato: MAGGIORE.MINORE.CORREZIONE. Ogni gruppo di funzioni nuove aumenta il numero MINORE; le sole correzioni aumentano CORREZIONE.
 
+## 0.10.0 «Organizzazione» — 2026-10-15
+- Promemoria: liste colorate, viste Oggi, Programmati, Tutti, Con bandiera e Completati, scadenze con ora, priorità, bandiera, note; avviso nel Centro notifiche alla scadenza.
+- Calendario completo: viste giorno, settimana e mese, più calendari colorati da mostrare o nascondere, eventi ripetuti (giornalieri, settimanali, mensili, annuali), eventi di tutto il giorno, avvisi prima dell'inizio.
+- Contatti: rubrica con telefoni, email, indirizzi, compleanno, sito, note e foto; preferiti e ricerca; importazione ed esportazione vCard (iPhone, Android, Outlook).
+- TextEdit: crea e modifica file di testo e Markdown (con anteprima affiancata) direttamente dal Finder e dalla scrivania; avviso se chiudi senza salvare.
+- Scrivania: le icone si spostano dove vuoi e restano lì su ogni dispositivo; «Mantieni allineate», «Riordina» e «Ordina per» dal tasto destro; trascinando un'icona su una cartella, sul Finder o sul Cestino si sposta il file.
+
 ## 0.9.2 — 2026-10-15
 - «Info su MarX» ha i pulsanti «Novità» e «Aggiornamento software…».
 

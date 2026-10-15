@@ -1,9 +1,13 @@
 <?php
 
+use App\Http\Controllers\AlertController;
 use App\Http\Controllers\AppStoreController;
+use App\Http\Controllers\CalendarController;
+use App\Http\Controllers\ContactController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\FileController;
 use App\Http\Controllers\NoteController;
+use App\Http\Controllers\ReminderController;
 use App\Http\Controllers\SearchController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\ShareController;
@@ -51,6 +55,34 @@ Route::middleware('auth')->group(function () {
     Route::post('/files/move', [FileController::class, 'move']);
     Route::post('/files/duplicate', [FileController::class, 'duplicate']);
     Route::get('/files/text', [FileController::class, 'text']);
+    Route::post('/files/save', [FileController::class, 'save']);
+
+    Route::get('/reminders', [ReminderController::class, 'index']);
+    Route::post('/reminders', [ReminderController::class, 'store']);
+    Route::put('/reminders/{id}', [ReminderController::class, 'update'])->whereNumber('id');
+    Route::delete('/reminders/{id}', [ReminderController::class, 'destroy'])->whereNumber('id');
+    Route::post('/reminder-lists', [ReminderController::class, 'storeList']);
+    Route::put('/reminder-lists/{id}', [ReminderController::class, 'updateList'])->whereNumber('id');
+    Route::delete('/reminder-lists/{id}', [ReminderController::class, 'destroyList'])->whereNumber('id');
+
+    Route::get('/calendars', [CalendarController::class, 'calendars']);
+    Route::post('/calendars', [CalendarController::class, 'storeCalendar']);
+    Route::put('/calendars/{id}', [CalendarController::class, 'updateCalendar'])->whereNumber('id');
+    Route::delete('/calendars/{id}', [CalendarController::class, 'destroyCalendar'])->whereNumber('id');
+    Route::get('/events', [CalendarController::class, 'events']);
+    Route::post('/events', [CalendarController::class, 'store']);
+    Route::put('/events/{id}', [CalendarController::class, 'update'])->whereNumber('id');
+    Route::delete('/events/{id}', [CalendarController::class, 'destroy'])->whereNumber('id');
+    Route::get('/alerts', [AlertController::class, 'index']);
+
+    Route::get('/contacts', [ContactController::class, 'index']);
+    Route::post('/contacts', [ContactController::class, 'store']);
+    Route::put('/contacts/{id}', [ContactController::class, 'update'])->whereNumber('id');
+    Route::delete('/contacts/{id}', [ContactController::class, 'destroy'])->whereNumber('id');
+    Route::post('/contacts/{id}/photo', [ContactController::class, 'uploadPhoto'])->whereNumber('id');
+    Route::get('/contacts/{id}/photo', [ContactController::class, 'photo'])->whereNumber('id');
+    Route::post('/contacts/import', [ContactController::class, 'import']);
+    Route::get('/contacts/export', [ContactController::class, 'export']);
     Route::get('/files/trash', [FileController::class, 'trash']);
     Route::post('/files/trash/restore', [FileController::class, 'restore']);
     Route::delete('/files/trash', [FileController::class, 'emptyTrash']);

@@ -49,6 +49,8 @@
             <button class="dock-item" data-open="finder" data-label="Finder"><span class="ico ico-finder"></span></button>
             <button class="dock-item" data-open="launchpad" data-label="Launchpad"><span class="ico ico-launchpad"></span></button>
             <button class="dock-item" data-open="notes" data-label="Note"><span class="ico ico-notes"></span></button>
+            <button class="dock-item" data-open="reminders" data-label="Promemoria"><span class="ico ico-reminders"></span></button>
+            <button class="dock-item" data-open="contacts" data-label="Contatti"><span class="ico ico-contacts"></span></button>
             <button class="dock-item" data-open="webx" data-label="webX"><span class="ico ico-webx"></span></button>
             <button class="dock-item" data-open="calculator" data-label="Calcolatrice"><span class="ico ico-calc"></span></button>
             <button class="dock-item" data-open="calendar" data-label="Calendario"><span class="ico ico-calendar"><b id="dockDay"></b></span></button>

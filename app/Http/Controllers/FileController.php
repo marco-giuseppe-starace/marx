@@ -266,19 +266,37 @@ class FileController extends Controller
             : $this->disk()->download($file);
     }
 
-    /** Inizio di un file di testo per Quick Look (sempre come testo semplice). */
+    /** Testo di un file: l'inizio per Quick Look, oppure tutto (fino a 5 MB) per TextEdit con «full=1». */
     public function text(Request $request)
     {
         $file = $this->path($request, $request->query('path'));
         abort_unless($this->disk()->fileExists($file), 404);
+        $limit = $request->boolean('full') ? 5_000_000 : 200_000;
+        abort_if($request->boolean('full') && $this->disk()->size($file) > $limit, 422, 'Il file è troppo grande per TextEdit (massimo 5 MB).');
         $fh = fopen($this->disk()->path($file), 'rb');
-        $data = fread($fh, 200_000);
+        $data = (string) fread($fh, $limit);
         fclose($fh);
         if (! mb_check_encoding($data, 'UTF-8')) {
             $data = mb_convert_encoding($data, 'UTF-8', 'Windows-1252');
         }
 
-        return response($data, 200, ['Content-Type' => 'text/plain; charset=UTF-8', 'X-Truncated' => $this->disk()->size($file) > 200_000 ? '1' : '0']);
+        return response($data, 200, ['Content-Type' => 'text/plain; charset=UTF-8', 'X-Truncated' => $this->disk()->size($file) > $limit ? '1' : '0']);
+    }
+
+    /** Salva un file di testo (TextEdit): lo crea oppure lo sovrascrive. */
+    public function save(Request $request)
+    {
+        $request->validate(['path' => ['required', 'string'], 'content' => ['present', 'nullable', 'string', 'max:5000000']]);
+        $rel = $this->rel($request->path);
+        abort_if($rel === '', 422);
+        $this->name(basename($rel));
+        $this->disk()->makeDirectory($request->user()->filesRoot().'/Scrivania');  // la scrivania esiste sempre
+        $dir = $this->path($request, ltrim(dirname('/'.$rel), '/'));
+        abort_unless($this->disk()->directoryExists($dir), 404, 'La cartella non esiste più.');
+        abort_if($this->disk()->directoryExists($this->path($request, $rel)), 422, 'Esiste già una cartella con questo nome.');
+        $this->disk()->put($this->path($request, $rel), (string) $request->input('content'));
+
+        return ['path' => $rel, 'size' => $this->disk()->size($this->path($request, $rel)), 'modified' => $this->disk()->lastModified($this->path($request, $rel))];
     }
 
     // ---------------------------------------------------------------- Cestino

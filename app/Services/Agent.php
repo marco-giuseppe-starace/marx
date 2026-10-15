@@ -10,11 +10,12 @@ use RuntimeException;
  */
 class Agent
 {
-    private const SOCKET = 'unix:///run/marx-agent/agent.sock';
+
 
     public static function call(string $cmd, array $args = [], int $timeout = 60): mixed
     {
-        $sock = @stream_socket_client(self::SOCKET, $errno, $error, 5);
+        // Percorso configurabile: la copia di prova punta a un socket inesistente e non tocca Docker
+        $sock = @stream_socket_client('unix://'.config('marx.agent_socket'), $errno, $error, 5);
         if (! $sock) {
             throw new RuntimeException('Il servizio Soft Store non è raggiungibile. Riprova tra qualche secondo.');
         }
