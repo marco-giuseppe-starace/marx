@@ -589,7 +589,7 @@
             <aside class="sidebar fx-side">
                 <h4>Preferiti</h4>
                 <button data-go="files:" data-drop-path=""><span class="fx-si"><span class="ico ico-folder"></span></span>I miei file</button>
-                <button data-go="files:Scrivania" data-drop-path="Scrivania"><span class="fx-si"><span class="ico ico-desk"></span></span>Scrivania</button>
+                <button data-go="files:Scrivania" data-drop-path="Scrivania" draggable="true"><span class="fx-si"><span class="ico ico-desk"></span></span>Scrivania</button>
                 <button data-go="shared:"><span class="fx-si"><span class="ico ico-shared"></span></span>Condivisi con me</button>
                 <button data-go="links:"><span class="fx-si"><span class="ico ico-link"></span></span>Link condivisi</button>
                 <h4>Posizioni</h4>
@@ -632,7 +632,7 @@
         function drawCrumbs() {
             if (loc === 'files') {
                 const segs = path ? path.split('/') : [];
-                crumbs.innerHTML = `<button data-go="files:" data-drop-path="">I miei file</button>` + segs.map((s, i) => `<span>›</span><button data-go="files:${esc(segs.slice(0, i + 1).join('/'))}" data-drop-path="${esc(segs.slice(0, i + 1).join('/'))}">${esc(s)}</button>`).join('');
+                crumbs.innerHTML = `<button data-go="files:" data-drop-path="">I miei file</button>` + segs.map((s, i) => `<span>›</span><button draggable="true" data-go="files:${esc(segs.slice(0, i + 1).join('/'))}" data-drop-path="${esc(segs.slice(0, i + 1).join('/'))}">${esc(s)}</button>`).join('');
             } else crumbs.innerHTML = `<b>${esc(loc.startsWith('tag:') ? 'Tag ' + TAGS[loc.slice(4)][0].toLowerCase() : LOC_TITLE[loc])}</b>`;
         }
         function itemHTML(it, i) {
@@ -867,6 +867,15 @@
         });
         // Trascinamento: dagli elementi verso cartelle, barra laterale, Cestino, scrivania
         body.addEventListener('dragstart', e => {
+            // Cartelle della barra laterale e del percorso in alto (es. «Scrivania»): trascinabili come sul Mac
+            const side = e.target.closest('[data-go^="files:"]');
+            if (side) {
+                const p = side.dataset.go.slice(6);
+                if (!p) { e.preventDefault(); return; }  // «I miei file» è la cartella principale
+                e.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ paths: [p], items: [{ path: p, type: 'folder' }] }));
+                e.dataTransfer.effectAllowed = 'copyMove';
+                return;
+            }
             const f = e.target.closest('[data-i], [data-colgo]'); if (!f) return;
             let list;
             if (f.dataset.colgo) list = [{ path: f.dataset.colgo, type: f.dataset.coltype }];

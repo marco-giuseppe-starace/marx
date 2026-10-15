@@ -3,6 +3,9 @@
 La versione corrente è in `config/marx.php`.
 Formato: MAGGIORE.MINORE.CORREZIONE. Ogni gruppo di funzioni nuove aumenta il numero MINORE; le sole correzioni aumentano CORREZIONE.
 
+## 0.10.2 — 2026-10-15
+- Le cartelle della barra laterale del Finder (es. «Scrivania») e del percorso in alto si possono trascinare nel Dock, come sul Mac.
+
 ## 0.10.1 — 2026-10-15
 - Dock personalizzabile come sul Mac, salvato nell'account: trascina un'app dal Launchpad nel Dock per fissarla, trascina le icone per riordinarle, trascinale fuori dal Dock per toglierle (il Finder resta sempre).
 - Le app aperte ma non fissate compaiono in una sezione a parte; dal tasto destro «Mantieni nel Dock» o «Rimuovi dal Dock».
