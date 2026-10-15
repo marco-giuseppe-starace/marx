@@ -45,24 +45,7 @@
 
     {{-- Dock --}}
     <nav class="dock-wrap" aria-label="Dock">
-        <div class="dock" id="dock">
-            <button class="dock-item" data-open="finder" data-label="Finder"><span class="ico ico-finder"></span></button>
-            <button class="dock-item" data-open="launchpad" data-label="Launchpad"><span class="ico ico-launchpad"></span></button>
-            <button class="dock-item" data-open="notes" data-label="Note"><span class="ico ico-notes"></span></button>
-            <button class="dock-item" data-open="reminders" data-label="Promemoria"><span class="ico ico-reminders"></span></button>
-            <button class="dock-item" data-open="contacts" data-label="Contatti"><span class="ico ico-contacts"></span></button>
-            <button class="dock-item" data-open="webx" data-label="webX"><span class="ico ico-webx"></span></button>
-            <button class="dock-item" data-open="calculator" data-label="Calcolatrice"><span class="ico ico-calc"></span></button>
-            <button class="dock-item" data-open="calendar" data-label="Calendario"><span class="ico ico-calendar"><b id="dockDay"></b></span></button>
-            <button class="dock-item" data-open="settings" data-label="Impostazioni"><span class="ico ico-settings"></span></button>
-            @if (auth()->user()->is_admin)
-            <button class="dock-item" data-open="appstore" data-label="Soft Store"><span class="ico ico-appstore"></span></button>
-            <button class="dock-item" data-open="activity" data-label="Monitoraggio Attività"><span class="ico ico-activity"></span></button>
-            @endif
-            <span id="dockApps" class="dock-apps"></span>
-            <span class="dock-sep"></span>
-            <button class="dock-item" data-open="trash" data-label="Cestino"><span class="ico ico-trash"></span></button>
-        </div>
+        <div class="dock" id="dock"></div>
     </nav>
 
     {{-- Spotlight --}}

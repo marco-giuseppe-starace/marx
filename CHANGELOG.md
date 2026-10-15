@@ -3,6 +3,12 @@
 La versione corrente è in `config/marx.php`.
 Formato: MAGGIORE.MINORE.CORREZIONE. Ogni gruppo di funzioni nuove aumenta il numero MINORE; le sole correzioni aumentano CORREZIONE.
 
+## 0.10.1 — 2026-10-15
+- Dock personalizzabile come sul Mac, salvato nell'account: trascina un'app dal Launchpad nel Dock per fissarla, trascina le icone per riordinarle, trascinale fuori dal Dock per toglierle (il Finder resta sempre).
+- Le app aperte ma non fissate compaiono in una sezione a parte; dal tasto destro «Mantieni nel Dock» o «Rimuovi dal Dock».
+- File e cartelle nella parte destra del Dock: trascinali dal Finder o dalla scrivania; una cartella si apre a griglia con il suo contenuto.
+- Trascinare un file su TextEdit nel Dock lo apre in TextEdit; sul Finder lo mostra nella sua cartella.
+
 ## 0.10.0 «Organizzazione» — 2026-10-15
 - Promemoria: liste colorate, viste Oggi, Programmati, Tutti, Con bandiera e Completati, scadenze con ora, priorità, bandiera, note; avviso nel Centro notifiche alla scadenza.
 - Calendario completo: viste giorno, settimana e mese, più calendari colorati da mostrare o nascondere, eventi ripetuti (giornalieri, settimanali, mensili, annuali), eventi di tutto il giorno, avvisi prima dell'inizio.

@@ -921,3 +921,30 @@ html.cur-mac .file, html.cur-mac .frow, html.cur-mac .fcrow { cursor: var(--cur-
 .sheet .acts [data-extra].danger { background: transparent; color: #ff3b30; box-shadow: inset 0 0 0 1px rgba(255,59,48,.4); }
 .rm-text { display: grid; grid-template-columns: 1fr auto; align-items: baseline; column-gap: 6px; }
 .rm-text .rm-meta { grid-column: 1 / -1; }
+
+/* ---------- Dock personalizzabile ---------- */
+.dock-day { font-weight: 400; }
+.dock.dragging .dock-item { transition: width .18s, height .18s, margin .18s; }
+.dock-item.dock-placeholder { opacity: .25; }
+.dock-item.dock-placeholder.collapsed { width: 0 !important; margin: 0 -2px; opacity: 0; overflow: hidden; }
+.dock-ghost { position: fixed; z-index: 2500; pointer-events: none; transition: opacity .15s; filter: drop-shadow(0 10px 18px rgba(0,0,0,.35)); }
+.dock-ghost .ico { width: 100%; height: 100%; }
+.dock-ghost em { position: absolute; left: 50%; top: -30px; transform: translateX(-50%); font-style: normal; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--lg-tint-strong); color: var(--text); white-space: nowrap; opacity: 0; box-shadow: var(--lg-shadow); }
+.dock-ghost.remove { opacity: .65; }
+.dock-ghost.remove em { opacity: 1; }
+.dock.drop-stack [data-sep="stack"] { width: 3px; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+.dock-item.drop .ico { transform: scale(1.12); box-shadow: 0 0 0 3px var(--accent); }
+.poof { position: fixed; z-index: 2600; width: 60px; height: 60px; margin: -30px 0 0 -30px; pointer-events: none; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,.95) 0 20%, rgba(255,255,255,.6) 35%, transparent 65%); animation: poof .55s ease-out forwards; }
+@keyframes poof { from { transform: scale(.3); opacity: 1; } to { transform: scale(1.8); opacity: 0; } }
+.dock-pop { position: fixed; z-index: 1300; width: 320px; max-height: 60vh; display: flex; flex-direction: column; border-radius: 20px; padding: 10px;
+    background: var(--lg-tint-strong); backdrop-filter: blur(40px) saturate(1.8); -webkit-backdrop-filter: blur(40px) saturate(1.8); box-shadow: inset 0 1px 0 var(--lg-edge-soft), var(--lg-shadow); color: var(--text); animation: lgPop .22s cubic-bezier(.2,1.1,.3,1); }
+.dock-pop-head { text-align: center; padding: 2px 0 8px; }
+.dock-pop-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; overflow: auto; }
+.dock-pop-grid > small { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 16px 0; }
+.dock-pop-grid button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 2px; border-radius: 10px; font-size: 11px; cursor: pointer; min-width: 0; }
+.dock-pop-grid button:hover { background: rgba(127,127,127,.18); }
+.dock-pop-grid .ico { width: 44px; height: 44px; }
+.dock-pop-grid span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-pop-open { margin-top: 8px; color: var(--accent); font-weight: 600; cursor: pointer; padding: 4px; }
+html.cur-mac .dock-pop-grid button, html.cur-mac .dock-pop-open { cursor: var(--cur-default) !important; }

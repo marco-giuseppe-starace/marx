@@ -96,7 +96,7 @@
         ],
         dndUntil: 0, sounds: true, soundVolume: 0.5, notifySound: 'vetro', startupSound: true,
         screensaverMinutes: 0, screensaverStyle: 'aurora', shortcuts: {},
-        stageManager: false, tiling: true, desktopStacks: false, deskAlign: true, deskSort: 'none', deskPositions: {}, hotTL: 'none', hotTR: 'none', hotBL: 'none', hotBR: 'none',
+        dockApps: null, dockStack: [], stageManager: false, tiling: true, desktopStacks: false, deskAlign: true, deskSort: 'none', deskPositions: {}, hotTL: 'none', hotTR: 'none', hotBL: 'none', hotBR: 'none',
         cursorStyle: 'mac', cursorSize: 1, cursorFill: '#000000', cursorOutline: '#ffffff', shakeToLocate: true, titlebarDoubleClick: 'maximize',
     };
     const S = { ...DEFAULTS, ...(MARX.settings || {}) };
@@ -353,13 +353,6 @@
         if (top) focus(top); else { active = null; renderMenubar(); layoutStage(); }
     }
     let mru = [];  // app usate di recente, la prima è quella attiva
-    function updateDock() {
-        const pins = store.get('dockPins', []);
-        const ids = Object.keys(APPS).filter(k => APPS[k].web && (pins.includes(k) || wins.has(k)));
-        const box = $('#dockApps');
-        if (box) box.innerHTML = ids.map(k => `<button class="dock-item" data-open="${k}" data-label="${esc(APPS[k].name)}">${icoHTML(APPS[k])}</button>`).join('');
-        document.querySelectorAll('.dock-item').forEach(b => b.classList.toggle('running', wins.has(b.dataset.open)));
-    }
     function persist(w, id) {
         store.set('win.' + id, { x: parseInt(w.style.left), y: parseInt(w.style.top), w: parseInt(w.style.width), h: parseInt(w.style.height) });
     }
@@ -493,7 +486,7 @@
     const fileUrl = (p, inline) => '/files/download?path=' + encodeURIComponent(p) + (inline ? '&inline=1' : '');
     const fmtDate = t => t ? new Date(t * 1000).toLocaleString('it-IT', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
     const filesChanged = detail => window.dispatchEvent(new CustomEvent('marx:files', { detail }));
-    function setTrashFull(n) { document.querySelector('.dock-item[data-open="trash"] .ico')?.classList.toggle('full', n > 0); }
+    function setTrashFull(n) { lastTrash = n; document.querySelector('.dock-item[data-open="trash"] .ico')?.classList.toggle('full', n > 0); }
 
     // Quick Look: anteprima veloce (barra spaziatrice). list: [{name, type, url, text}], frecce per scorrere.
     let ql = null;
@@ -875,10 +868,10 @@
         // Trascinamento: dagli elementi verso cartelle, barra laterale, Cestino, scrivania
         body.addEventListener('dragstart', e => {
             const f = e.target.closest('[data-i], [data-colgo]'); if (!f) return;
-            let paths;
-            if (f.dataset.colgo) paths = [f.dataset.colgo];
-            else { const i = +f.dataset.i; if (!sel.has(i)) select(i); paths = selItems().map(full); }
-            e.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ paths }));
+            let list;
+            if (f.dataset.colgo) list = [{ path: f.dataset.colgo, type: f.dataset.coltype }];
+            else { const i = +f.dataset.i; if (!sel.has(i)) select(i); list = selItems().map(it => ({ path: full(it), type: it.type })); }
+            e.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ paths: list.map(x => x.path), items: list }));
             e.dataTransfer.effectAllowed = 'move';
         });
         body.addEventListener('dragover', e => {
@@ -1017,7 +1010,7 @@
                 if (!dragging) { dragging = true; moving.forEach(x => x.classList.add('dragging')); }
                 start.forEach(([x, l, t]) => { x.style.left = l + dx + 'px'; x.style.top = t + dy + 'px'; });
                 const under = document.elementFromPoint(ev.clientX, ev.clientY);
-                const t = under?.closest('.dock-item[data-open="trash"], .desk-icon[data-drop-path], .window [data-drop-path], .window .fview');
+                const t = under?.closest('.dock-item[data-open="trash"], .dock-item[data-open="textedit"], .desk-icon[data-drop-path], .window [data-drop-path], .window .fview, #dock');
                 if (t !== target) { target?.classList.remove('drop'); target = t && !moving.includes(t) ? t : null; target?.classList.add('drop'); }
             };
             const up = async ev => {
@@ -1028,7 +1021,9 @@
                 const paths = moving.map(entryOf).filter(x => x?.type === 'file').map(x => 'Scrivania/' + x.f.name);
                 if (target && paths.length) {
                     try {
-                        if (target.matches('.dock-item')) { const r = await api('DELETE', '/files', { paths }); playSound('trash'); setTrashFull(r.trash); }
+                        if (target.matches('.dock-item[data-open="trash"]')) { const r = await api('DELETE', '/files', { paths }); playSound('trash'); setTrashFull(r.trash); }
+                        else if (target.matches('.dock-item[data-open="textedit"]')) { paths.forEach(p => openTextEdit(p)); return draw(); }
+                        else if (target.matches('#dock')) { addToStack(moving.map(entryOf).filter(x => x?.type === 'file').map(x => ({ path: 'Scrivania/' + x.f.name, type: x.f.type }))); return draw(); }
                         else {
                             const to = target.dataset.dropPath ?? (target.closest('.window') === wins.get('finder') ? ctlOf('finder').currentPath?.() : null);
                             if (to == null) return draw();
@@ -2601,6 +2596,10 @@
         const inp = $('input', lp); inp.focus();
         inp.oninput = () => lp.querySelectorAll('.lp-grid button').forEach(b => b.hidden = !b.textContent.toLowerCase().includes(inp.value.toLowerCase()));
         lp.addEventListener('click', e => { if (e.target === lp || e.target.closest('[data-open]')) lp.remove(); });
+        lp.addEventListener('pointerdown', e => {
+            const b = e.target.closest('.lp-grid [data-open]'); if (!b) return;
+            dragAfterThreshold(e, ev => { lp.remove(); dragAppIntoDock(b.dataset.open, ev); });
+        });
     }
 
     /* ---------- Menu ---------- */
@@ -2657,15 +2656,12 @@
             const ok = await sheet(w, { title: 'Svuotare il Cestino?', text: 'Gli elementi verranno eliminati definitivamente. Non si può annullare.', ok: 'Svuota', danger: true });
             if (ok) try { const r = await api('DELETE', '/files/trash', {}); playSound('trash'); setTrashFull(r.trash); filesChanged(); } catch (e) { toast(e.message); }
         }]];
-        if (a.web) {
-            const pins = store.get('dockPins', []), pinned = pins.includes(id);
-            return [[a.name, null], '-', running ? ['Mostra', () => open(id)] : ['Apri', () => open(id)],
-                ['Apri in una nuova scheda', () => window.open(a.url, '_blank', 'noopener')],
-                [pinned ? 'Togli dal Dock' : 'Mantieni nel Dock', () => { store.set('dockPins', pinned ? pins.filter(x => x !== id) : [...pins, id]); updateDock(); }],
-                ...(running ? ['-', ['Esci', () => close(id)]] : [])];
-        }
+        const pinned = dockApps().includes(id), keep = pinned
+            ? ['Rimuovi dal Dock', !DOCK_FIXED.includes(id) && (() => { saveDockApps(dockApps().filter(x => x !== id)); updateDock(); })]
+            : ['Mantieni nel Dock', () => { saveDockApps([...dockApps(), id]); updateDock(); }];
         return [[a.name, null], '-', running ? ['Mostra', () => open(id)] : ['Apri', () => open(id)],
-            ...(running ? [['Nascondi', () => minimize(id)], ['Impostazioni…', ctlOf(id).prefs && (() => { open(id); ctlOf(id).prefs(); })], '-', ['Esci', () => close(id)]] : [])];
+            ...(a.web ? [['Apri in una nuova scheda', () => window.open(a.url, '_blank', 'noopener')]] : []), '-', keep,
+            ...(running ? ['-', ['Nascondi', () => minimize(id)], ['Impostazioni…', ctlOf(id).prefs && (() => { open(id); ctlOf(id).prefs(); })], '-', ['Esci', () => close(id)]] : [])];
     }
     // Tasto destro su tutta l'interfaccia (i campi di testo mantengono il menu del browser per copia/incolla)
     document.addEventListener('contextmenu', e => {
@@ -2675,7 +2671,11 @@
         e.preventDefault();
         let items = null;
         const dock = t.closest('.dock-item'), desk = t.closest('.desk-icon'), win = t.closest('.window');
-        if (dock) items = dockMenu(dock.dataset.open);
+        if (dock?.dataset.stackPath) {
+            const p = dock.dataset.stackPath, type = dock.dataset.stackType;
+            items = [['Apri', () => (type === 'folder' ? stackPopover(dock) : openPath(p, 'file'))], ['Mostra nel Finder', () => { open('finder'); ctlOf('finder').reveal?.(p, type); }], '-',
+                ['Rimuovi dal Dock', () => { saveDockStack(dockStack().filter(x => x.path !== p)); updateDock(); }]];
+        } else if (dock) items = dockMenu(dock.dataset.open);
         else if (desk && !desk.dataset.open) return;
         else if (desk) items = [['Apri', () => open(desk.dataset.open)], '-', ['Ottieni informazioni', () => toast(`${desk.textContent.trim()} · ${APPS[desk.dataset.open].name}`)]];
         else if (win) {
@@ -3269,8 +3269,14 @@
         if (hit) { e.preventDefault(); SHORTCUT_RUN[hit[0]](); }
     });
     if (store.get('locked', false)) lock();
+    setTimeout(updateDock);  // dopo che tutto il codice (compreso quello del Dock) è stato letto
     const deskView = desktopFiles(); deskView.load();
-    loadWebApps().finally(() => { if (S.restoreWindows) restoreSession(); });
+    loadWebApps().finally(() => {
+        // App web fissate con la versione precedente (salvate solo nel browser): passano nel Dock dell'account
+        const old = store.get('dockPins', []).filter(id => APPS[id]);
+        if (old.length) { saveDockApps([...dockApps(), ...old]); store.set('dockPins', []); updateDock(); }
+        if (S.restoreWindows) restoreSession();
+    });
     drawDnd();
     // Il browser fa suonare solo dopo un gesto dell'utente: il suono di avvio parte al primo clic della sessione
     if (S.startupSound && !sessionStorage.getItem('marx.started')) {
@@ -3282,16 +3288,177 @@
         const d = new Date();
         const time = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', ...(S.clockSeconds ? { second: '2-digit' } : {}) });
         $('#clock').textContent = (S.clockDate ? d.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' }) + '  ' : '') + time;
-        $('#dockDay').textContent = d.getDate();
+        document.querySelectorAll('.dock-day').forEach(x => { x.textContent = d.getDate(); });
     }
     tick(); setInterval(tick, 1000);
 
-    /* ---------- Dock: trascinare file sul Cestino ---------- */
+    /* ---------- Dock personalizzabile (salvato nell'account) ---------- */
+    var DOCK_DEFAULT = ['finder', 'launchpad', 'notes', 'reminders', 'contacts', 'webx', 'calculator', 'calendar', 'settings', ...(MARX.user.is_admin ? ['appstore', 'activity'] : [])];
+    var DOCK_FIXED = ['finder'];  // come sul Mac, il Finder non si toglie
+    function dockApps() { return (Array.isArray(S.dockApps) && S.dockApps.length ? S.dockApps : DOCK_DEFAULT).filter(id => APPS[id]); }
+    function dockStack() { return Array.isArray(S.dockStack) ? S.dockStack : []; }
+    function dockItemHTML(id, cls = '') {
+        const a = APPS[id]; if (!a) return '';
+        const ico = id === 'calendar' ? `<span class="ico ico-calendar"><b class="dock-day">${new Date().getDate()}</b></span>` : icoHTML(a);
+        return `<button class="dock-item ${cls}" data-open="${esc(id)}" data-label="${esc(a.name)}">${ico}</button>`;
+    }
+    var stackHTML = s => `<button class="dock-item dock-stack" data-stack-path="${esc(s.path)}" data-stack-type="${s.type}" data-label="${esc(s.path.split('/').pop())}">${s.type === 'folder' ? '<span class="ico ico-folder"></span>' : fileIcon({ name: s.path, type: 'file' })}</button>`;
+    var lastTrash = 0;
+    function runningIds() {
+        return [...new Set([...wins.keys()].map(k => (k.startsWith('te-') ? 'textedit' : k)))].filter(k => APPS[k] && !APPS[k].special && (!APPS[k].hidden || k === 'textedit'));
+    }
+    function updateDock() {
+        const dock = $('#dock'); if (!dock || dock.classList.contains('dragging')) return;
+        const pinned = dockApps(), run = runningIds(), extra = run.filter(k => !pinned.includes(k));
+        dock.innerHTML = pinned.map(id => dockItemHTML(id)).join('')
+            + (extra.length ? '<span class="dock-sep" data-sep="recent"></span>' + extra.map(id => dockItemHTML(id, 'transient')).join('') : '')
+            + '<span class="dock-sep" data-sep="stack"></span>' + dockStack().map(stackHTML).join('')
+            + `<button class="dock-item" data-open="trash" data-label="Cestino"><span class="ico ico-trash ${lastTrash > 0 ? 'full' : ''}"></span></button>`;
+        dock.querySelectorAll('.dock-item[data-open]').forEach(b => b.classList.toggle('running', run.includes(b.dataset.open)));
+        drawUpdateBadge();
+    }
+    // Apre un file o una cartella con l'app giusta (Dock, scrivania)
+    function openPath(p, type) {
+        if (type === 'folder') { open('finder'); return ctlOf('finder').go?.('files', p); }
+        const name = p.split('/').pop(), k = kindOf(name, 'file');
+        if (k === 'img' || k === 'pdf') return openPreview(name, fileUrl(p, true), k);
+        if (k === 'text') return openTextEdit(p);
+        quickLook([qlItem({ name, type: 'file' }, p)]);
+    }
+    // Cartella nel Dock: si apre a griglia sopra l'icona
+    async function stackPopover(btn) {
+        $('.dock-pop')?.remove();
+        const p = btn.dataset.stackPath, name = p.split('/').pop();
+        const pop = document.createElement('div'); pop.className = 'dock-pop'; pop.innerHTML = `<div class="dock-pop-head"><b>${esc(name)}</b></div><div class="dock-pop-grid"><small>Caricamento…</small></div><button class="dock-pop-open">Apri nel Finder</button>`;
+        document.body.append(pop);
+        const r = btn.getBoundingClientRect();
+        pop.style.left = Math.max(8, Math.min(innerWidth - pop.offsetWidth - 8, r.left + r.width / 2 - pop.offsetWidth / 2)) + 'px';
+        pop.style.bottom = innerHeight - $('#dock').getBoundingClientRect().top + 12 + 'px';  // sopra il Dock, anche se l'icona è ingrandita
+        $('.dock-pop-open', pop).onclick = () => { pop.remove(); openPath(p, 'folder'); };
+        let items = [];
+        try { items = (await api('GET', '/files?path=' + encodeURIComponent(p))).items; } catch { $('.dock-pop-grid', pop).innerHTML = '<small>La cartella non esiste più</small>'; return; }
+        $('.dock-pop-grid', pop).innerHTML = items.slice(0, 40).map((it, i) => `<button data-pi="${i}" title="${esc(it.name)}">${kindOf(it.name, it.type) === 'img' && it.size < 8e6 ? `<span class="ico ico-thumb"><img src="${esc(fileUrl(p + '/' + it.name, true))}" alt=""></span>` : fileIcon(it)}<span>${esc(it.name)}</span></button>`).join('') || '<small>Cartella vuota</small>';
+        $('.dock-pop-grid', pop).onclick = e => { const b = e.target.closest('[data-pi]'); if (!b) return; const it = items[+b.dataset.pi]; pop.remove(); openPath(p + '/' + it.name, it.type); };
+        setTimeout(() => addEventListener('pointerdown', function off(ev) { if (!pop.contains(ev.target)) { pop.remove(); removeEventListener('pointerdown', off, true); } }, true));
+    }
+    function poof(x, y) {
+        const el = document.createElement('div'); el.className = 'poof'; el.style.left = x + 'px'; el.style.top = y + 'px';
+        document.body.append(el); setTimeout(() => el.remove(), 600);
+    }
+    function saveDockApps(ids) { setSetting('dockApps', [...new Set(ids)]); }
+    function saveDockStack(list) { setSetting('dockStack', list); }
+    function addToStack(entries) {
+        const cur = dockStack(); entries.forEach(e => { if (!cur.some(x => x.path === e.path)) cur.push(e); });
+        saveDockStack(cur.slice(0, 20)); updateDock();
+    }
+
+    /* Trascinamento nel Dock: riordinare, togliere (trascinando fuori), fissare app dal Launchpad o dal Finder */
+    function dockDrag(e, src, opts = {}) {
+        // src: elemento del Dock da spostare (anche un segnaposto creato per un'app trascinata da fuori)
+        const dock = $('#dock'), kind = src.dataset.stackPath ? 'stack' : 'app';
+        const ghost = document.createElement('div'); ghost.className = 'dock-ghost'; ghost.innerHTML = src.innerHTML + '<em>Rimuovi</em>';
+        document.body.append(ghost);
+        const size = src.getBoundingClientRect().width || S.dockSize;
+        ghost.style.width = ghost.style.height = size + 'px';
+        dock.classList.add('dragging'); src.classList.add('dock-placeholder');
+        let removing = false;
+        const sectionEnd = () => kind === 'app' ? dock.querySelector('.dock-sep') : dock.querySelector('[data-open="trash"]');
+        const sectionStart = () => kind === 'app' ? null : dock.querySelector('[data-sep="stack"]');
+        const move = ev => {
+            ghost.style.left = ev.clientX - size / 2 + 'px'; ghost.style.top = ev.clientY - size / 2 + 'px';
+            const dr = dock.getBoundingClientRect();
+            removing = ev.clientY < dr.top - 70 || ev.clientY > innerHeight + 10 || (opts.external && !(ev.clientY > dr.top - 30));
+            const fixed = DOCK_FIXED.includes(src.dataset.open);
+            ghost.classList.toggle('remove', removing && !opts.external && !fixed);
+            src.classList.toggle('collapsed', removing);
+            if (removing) return;
+            // posizione d'inserimento fra le icone della stessa sezione
+            const siblings = [...dock.children].filter(c => c !== src && c.classList.contains('dock-item') && !c.classList.contains('transient') && (kind === 'app' ? !c.dataset.stackPath && c.dataset.open !== 'trash' && c.compareDocumentPosition(sectionEnd()) & Node.DOCUMENT_POSITION_FOLLOWING : !!c.dataset.stackPath));
+            const after = siblings.find(c => { const r = c.getBoundingClientRect(); return ev.clientX < r.left + r.width / 2; });
+            if (after) dock.insertBefore(src, after);
+            else if (kind === 'app') dock.insertBefore(src, sectionEnd());
+            else dock.insertBefore(src, dock.querySelector('[data-open="trash"]'));
+        };
+        const up = ev => {
+            removeEventListener('pointermove', move); removeEventListener('pointerup', up);
+            ghost.remove(); dock.classList.remove('dragging');
+            const fixed = DOCK_FIXED.includes(src.dataset.open);
+            if (kind === 'app') {
+                let ids = [...dock.querySelectorAll('.dock-item[data-open]')].filter(c => c.compareDocumentPosition(sectionEnd()) & Node.DOCUMENT_POSITION_FOLLOWING || c === src)
+                    .filter(c => c.dataset.open !== 'trash' && (!c.classList.contains('transient') || c === src)).map(c => c.dataset.open);
+                if (removing) { if (fixed || opts.external) { if (fixed) toast('Il Finder resta sempre nel Dock'); } else { ids = ids.filter(x => x !== src.dataset.open); poof(ev.clientX, ev.clientY); } }
+                if (!(removing && opts.external)) saveDockApps(ids);
+            } else {
+                let list = [...dock.querySelectorAll('.dock-stack')].map(c => ({ path: c.dataset.stackPath, type: c.dataset.stackType }));
+                if (removing) { list = list.filter(x => x.path !== src.dataset.stackPath); poof(ev.clientX, ev.clientY); }
+                saveDockStack(list);
+            }
+            updateDock();
+        };
+        addEventListener('pointermove', move); addEventListener('pointerup', up);
+        move(e);
+    }
+    // Avvio del trascinamento dopo qualche pixel, così un semplice clic resta un clic
+    function dragAfterThreshold(e, start) {
+        if (e.button !== 0) return;
+        const sx = e.clientX, sy = e.clientY;
+        const move = ev => { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) { cleanup(); suppressNextClick(); start(ev); } };
+        const cleanup = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', cleanup); };
+        addEventListener('pointermove', move); addEventListener('pointerup', cleanup);
+    }
+    // Il clic generato dal rilascio di un trascinamento non deve aprire nulla; gli altri clic restano validi
+    function suppressNextClick() {
+        const stop = ev => { ev.stopPropagation(); ev.preventDefault(); };
+        addEventListener('click', stop, { capture: true, once: true });
+        addEventListener('pointerup', () => setTimeout(() => removeEventListener('click', stop, { capture: true }), 50), { once: true });
+    }
+    // Un'app trascinata da fuori (Launchpad, Finder): segnaposto nel Dock, poi stesso meccanismo
+    function dragAppIntoDock(id, e) {
+        const dock = $('#dock');
+        let src = dock.querySelector(`.dock-item[data-open="${CSS.escape(id)}"]:not(.transient)`);
+        const external = !src;
+        if (!src) { dock.querySelector('.dock-sep').insertAdjacentHTML('beforebegin', dockItemHTML(id)); src = dock.querySelector('.dock-sep').previousElementSibling; }
+        dockDrag(e, src, { external });
+    }
+
     (() => {
         const dock = $('#dock');
-        dock.addEventListener('dragover', e => { const t = e.target.closest('.dock-item[data-open="trash"]'); if (t && [...e.dataTransfer.types].includes(DRAG_TYPE)) { e.preventDefault(); t.classList.add('drop'); } });
-        dock.addEventListener('dragleave', e => e.target.closest('.dock-item')?.classList.remove('drop'));
-        dock.addEventListener('drop', e => { const t = e.target.closest('.dock-item[data-open="trash"]'); if (!t) return; e.preventDefault(); t.classList.remove('drop'); dropFiles(e, { trash: true }); });
+        dock.addEventListener('pointerdown', e => {
+            const it = e.target.closest('.dock-item'); if (!it || it.dataset.open === 'trash' || it.dataset.open === undefined && !it.dataset.stackPath) return;
+            dragAfterThreshold(e, ev => {
+                if (it.classList.contains('transient')) it.classList.remove('transient');  // un'app aperta trascinata fra le fisse diventa fissa
+                dockDrag(ev, it);
+            });
+        });
+        dock.addEventListener('click', e => { const st = e.target.closest('.dock-stack'); if (!st) return; e.stopPropagation(); st.dataset.stackType === 'folder' ? stackPopover(st) : openPath(st.dataset.stackPath, 'file'); });
+        // File trascinati dal Finder: Cestino, apri con un'app, oppure aggiunti a destra nel Dock
+        const targetOf = e => {
+            const it = e.target.closest('.dock-item');
+            if (it?.dataset.open === 'trash') return { trash: it };
+            if (it?.dataset.open === 'textedit' || it?.dataset.open === 'finder' || it?.dataset.open === 'webx') return { app: it };
+            return { stack: true };
+        };
+        dock.addEventListener('dragover', e => {
+            if (![...e.dataTransfer.types].includes(DRAG_TYPE)) return;
+            e.preventDefault();
+            const t = targetOf(e);
+            dock.querySelectorAll('.drop').forEach(x => x.classList.remove('drop'));
+            (t.trash || t.app)?.classList.add('drop');
+            dock.classList.toggle('drop-stack', !!t.stack);
+        });
+        dock.addEventListener('dragleave', e => { if (!dock.contains(e.relatedTarget)) { dock.querySelectorAll('.drop').forEach(x => x.classList.remove('drop')); dock.classList.remove('drop-stack'); } });
+        dock.addEventListener('drop', e => {
+            const raw = e.dataTransfer.getData(DRAG_TYPE); if (!raw) return;
+            e.preventDefault(); dock.querySelectorAll('.drop').forEach(x => x.classList.remove('drop')); dock.classList.remove('drop-stack');
+            const t = targetOf(e), data = JSON.parse(raw), items = data.items || data.paths.map(p => ({ path: p, type: 'file' }));
+            if (t.trash) return dropFiles(e, { trash: true });
+            if (t.app) {
+                const app = t.app.dataset.open;
+                items.forEach(x => { if (app === 'textedit' && x.type === 'file') openTextEdit(x.path); else if (app === 'finder') { open('finder'); ctlOf('finder').reveal?.(x.path, x.type); } else openPath(x.path, x.type); });
+                return;
+            }
+            addToStack(items);
+        });
     })();
 
     /* ---------- Dock che si nasconde da solo ---------- */
